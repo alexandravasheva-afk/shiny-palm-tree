@@ -1,0 +1,80 @@
+{
+  "entities": {
+    "Message": {
+      "title": "Message",
+      "description": "A secure encrypted message",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "senderId": { "type": "string" },
+        "receiverId": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "iv": { "type": "string" },
+        "isGroup": { "type": "boolean" },
+        "type": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileSize": { "type": "number" }
+      },
+      "required": ["id", "senderId", "receiverId", "content", "timestamp"]
+    },
+    "Contact": {
+      "title": "Contact",
+      "description": "A user contact",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" }
+      },
+      "required": ["userId"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "A user's public and private profile data",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "username": { "type": "string" },
+        "displayName": { "type": "string" },
+        "publicKey": { "type": "string" },
+        "passwordHash": { "type": "string" },
+        "encryptedPrivateKey": { "type": "string" },
+        "avatar": { "type": "string" },
+        "googleUid": { "type": "string" },
+        "role": { "type": "string" }
+      },
+      "required": ["id", "username", "publicKey", "passwordHash", "encryptedPrivateKey"]
+    },
+    "Group": {
+      "title": "Group",
+      "description": "A secure chat group",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "adminId": { "type": "string" },
+        "members": { "type": "array", "items": { "type": "string" } },
+        "avatar": { "type": "string" },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["id", "name", "adminId", "members"]
+    }
+  },
+  "firestore": {
+    "global_users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Global user profiles for registration and login"
+    },
+    "users/{userId}/messages": {
+      "schema": "Message",
+      "description": "Messages for a specific user"
+    },
+    "users/{userId}/contacts": {
+      "schema": "Contact",
+      "description": "Contacts for a specific user"
+    },
+    "groups/{groupId}": {
+      "schema": "Group",
+      "description": "Global group definitions"
+    }
+  }
+}

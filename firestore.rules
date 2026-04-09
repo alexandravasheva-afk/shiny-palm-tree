@@ -1,0 +1,144 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: global_users
+    // Document ID: appUserId (UUID)
+    // Fields:
+    //   - id: string (required) - The application-level user ID
+    //   - username: string (required) - The chosen username
+    //   - displayName: string (optional) - Display name
+    //   - avatar: string (optional) - Avatar URL
+    //   - publicKey: string (required) - The user's public encryption key
+    //   - firebaseUid: string (optional) - The Firebase Auth UID for ownership mapping
+    //   - role: string (optional) - User role (e.g., 'admin')
+    //
+    // Collection: users/{userId}/messages
+    // Document ID: messageId
+    // Fields:
+    //   - id: string (required)
+    //   - senderId: string (required)
+    //   - receiverId: string (required)
+    //   - content: string (required) - Encrypted content
+    //   - timestamp: number (required)
+    //
+    // Collection: groups
+    // Document ID: groupId
+    // Fields:
+    //   - id: string (required)
+    //   - name: string (required)
+    //   - adminId: string (required)
+    //   - members: list (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && 
+        (request.auth.uid == userId || 
+         (exists(/databases/$(database)/documents/global_users/$(userId)) && 
+          get(/databases/$(database)/documents/global_users/$(userId)).data.firebaseUid == request.auth.uid));
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+         (request.auth.token.email == "alexandra.vasheva@gmail.com" || 
+          request.auth.token.email == "Alexandra.Vasheva@gmail.com") && 
+         request.auth.token.email_verified == true;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.username is string && data.username.size() > 0 && data.username.size() < 50 &&
+             data.publicKey is string && data.publicKey.size() > 0 && data.publicKey.size() < 2000 &&
+             (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
+             (!('avatar' in data) || (data.avatar is string && data.avatar.size() < 1000)) &&
+             (!('firebaseUid' in data) || (data.firebaseUid is string && data.firebaseUid.size() < 128)) &&
+             (!('role' in data) || (data.role is string && data.role.size() < 20));
+    }
+
+    function isValidMessage(data) {
+      return data.id is string && data.id.size() > 0 && data.id.size() < 100 &&
+             data.senderId is string && data.senderId.size() > 0 && data.senderId.size() < 100 &&
+             data.receiverId is string && data.receiverId.size() > 0 && data.receiverId.size() < 100 &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 50000 &&
+             data.timestamp is number;
+    }
+
+    function isValidGroup(data) {
+      return data.id is string && data.id.size() > 0 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.adminId is string && data.adminId.size() > 0 &&
+             data.members is list && data.members.size() <= 500;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId) || isAdmin();
+
+      match /messages/{messageId} {
+        allow read: if isOwner(userId) || isAdmin();
+        allow create: if (isOwner(userId) || isAdmin()) && isValidMessage(request.resource.data);
+        allow update: if (isOwner(userId) || isAdmin()) && isValidMessage(request.resource.data);
+        allow delete: if isOwner(userId) || isAdmin();
+      }
+
+      match /contacts/{contactId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+      
+      match /groups/{groupId} {
+        allow read, write: if isOwner(userId) || isAdmin();
+      }
+    }
+
+    match /global_users/{userId} {
+      // Public profile info is readable by authenticated users
+      allow read: if isAuthenticated();
+      
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && 
+                      (request.resource.data.role != 'admin' || isAdmin());
+      
+      allow update: if isAuthenticated() && 
+                      (isOwner(userId) || isAdmin()) &&
+                      isValidUser(request.resource.data) &&
+                      (request.resource.data.role == resource.data.role || isAdmin());
+    }
+    
+    match /groups/{groupId} {
+      allow read: if isAuthenticated();
+      allow create: if isAuthenticated() && isValidGroup(request.resource.data);
+      allow update: if isAuthenticated() && 
+                      (resource.data.adminId == request.auth.uid || isAdmin()) &&
+                      isValidGroup(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.adminId == request.auth.uid || isAdmin());
+
+      match /messages/{messageId} {
+        allow read: if isAuthenticated(); // Or check if user is a member, but for now authenticated is fine
+        allow create: if isAuthenticated();
+        allow update, delete: if isAdmin() || (resource.data.senderId == request.auth.uid);
+      }
+    }
+  }
+}

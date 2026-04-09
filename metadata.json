@@ -1,0 +1,5 @@
+{
+  "name": "safeMS",
+  "description": "A secure, end-to-end encrypted messenger with a sleek dark style.",
+  "requestFramePermissions": ["camera", "microphone"]
+}
