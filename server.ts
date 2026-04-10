@@ -17,7 +17,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // 🔥 путь к dist (ВАЖНО)
-const distPath = path.join(__dirname, "dist");
+const distPath = __dirname;
 
 // ===== SOCKET.IO =====
 io.on("connection", (socket) => {
