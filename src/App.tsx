@@ -8,9 +8,6 @@ import { motion } from 'motion/react';
 import { Shield, ShieldCheck, Send, User, Lock, Key, MessageSquare, LogOut, Check, CheckCheck, Settings, UserPlus, Copy, X, SplitSquareHorizontal, Trash2, ArrowLeft, Paperclip, Bot, Monitor, File, Download, Smartphone, RefreshCw, Trash, Camera, AlertTriangle, Eye, EyeOff, BadgeCheck, QrCode, Users, Link, Phone, PhoneOff, Mic, MicOff } from 'lucide-react';
 import { cn } from './lib/utils';
 import { translations, Language } from './translations';
-import { db, auth } from './firebase';
-import { collection, doc, setDoc, getDocs, onSnapshot, query, orderBy, getDocFromServer, where } from 'firebase/firestore';
-import { signInAnonymously, onAuthStateChanged } from 'firebase/auth';
 import {
   generateKeyPair,
   exportPublicKey,
@@ -66,57 +63,6 @@ interface Message {
   fileSize?: number;
   isGroup?: boolean;
 }
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  };
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-};
 
 interface Group {
   id: string;
@@ -421,31 +367,8 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   }
 
   render() {
-    console.log("App rendering, mode:", this.props.children ? "has children" : "no children");
     if (this.state.hasError) {
-      let errorMessage = "Something went wrong.";
-      let details = "";
-      
-      try {
-        if (this.state.error && this.state.error.message) {
-          try {
-            const parsed = JSON.parse(this.state.error.message);
-            if (parsed.error && parsed.operationType) {
-              errorMessage = `Firestore ${parsed.operationType} error: ${parsed.error}`;
-              details = `Path: ${parsed.path}`;
-            } else {
-              errorMessage = this.state.error.message;
-            }
-          } catch (e) {
-            errorMessage = this.state.error.message;
-          }
-        } else {
-          errorMessage = String(this.state.error);
-        }
-      } catch (e) {
-        errorMessage = "An unexpected error occurred.";
-      }
-
+      const errorMessage = this.state.error?.message || String(this.state.error) || "Something went wrong.";
       return (
         <div className="h-full w-full bg-[#0a0a0a] flex items-center justify-center p-6 text-center">
           <div className="max-w-md w-full bg-[#121212] p-8 rounded-2xl border border-red-500/20 shadow-2xl space-y-6">
@@ -455,7 +378,6 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             <div className="space-y-2">
               <h2 className="text-xl font-bold text-white">Application Error</h2>
               <p className="text-zinc-400 text-sm">{errorMessage}</p>
-              {details && <p className="text-zinc-500 text-[10px] font-mono">{details}</p>}
             </div>
             <button 
               onClick={() => window.location.reload()}
@@ -561,8 +483,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   const [showGroupSettings, setShowGroupSettings] = useState(false);
   const [groupSettingsName, setGroupSettingsName] = useState('');
   const [showSettings, setShowSettings] = useState(false);
-  const [isFirebaseReady, setIsFirebaseReady] = useState(false);
-  const [firebaseError, setFirebaseError] = useState<string | null>(null);
   const [broadcastText, setBroadcastText] = useState('');
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -627,19 +547,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       socket.emit('update_profile', { id: currentUser.id, displayName: (newDisplayName || '').trim() });
     }
     addLog('Display name updated', 'success');
-    
-    // Sync Firebase UID if possible
-    if (db && auth.currentUser) {
-      const path = `global_users/${currentUser.id}`;
-      setDoc(doc(db, 'global_users', currentUser.id), {
-        firebaseUid: auth.currentUser.uid
-      }, { merge: true }).catch(e => {
-        console.error('Sync failed', e);
-        if (e.code === 'permission-denied') {
-          handleFirestoreError(e, OperationType.WRITE, path);
-        }
-      });
-    }
   };
 
   const handleForgetAccount = () => {
@@ -684,13 +591,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
         socket.emit('update_profile', { id: currentUser.id, avatar: base64 });
       }
       addLog('Profile avatar updated', 'success');
-      
-      // Sync Firebase UID
-      if (db && auth.currentUser) {
-        setDoc(doc(db, 'global_users', currentUser.id), {
-          firebaseUid: auth.currentUser.uid
-        }, { merge: true }).catch(e => console.error('Sync failed', e));
-      }
     };
     reader.readAsDataURL(file);
   };
@@ -765,26 +665,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
     });
     setSocket(newSocket);
 
-    // Firebase Auth & Connection Test
-    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
-      if (user) {
-        setIsFirebaseReady(true);
-        addLog('Firebase Auth ready', 'success');
-      } else {
-        setIsFirebaseReady(false);
-        addLog('Firebase Auth: Not signed in', 'info');
-      }
-      
-      // Test connection regardless of auth (some collections might be public or we want to see the error)
-      try {
-        await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error) {
-        if (error instanceof Error && error.message.includes('the client is offline')) {
-          setFirebaseError("Firebase is offline. Check your configuration.");
-        }
-      }
-    });
-
     const loadData = async () => {
       const savedUser = loadFromStorage(`${storagePrefix}user`);
       if (savedUser) {
@@ -824,7 +704,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
     return () => {
       newSocket.close();
-      unsubscribeAuth();
     };
   }, [storagePrefix]);
 
@@ -835,98 +714,38 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
     }
   }, [contacts, isLoaded, storagePrefix]);
 
-  // Save messages to Firebase
+  // Save messages to local storage (optional, as server now persists)
   useEffect(() => {
-    if (isFirebaseReady && currentUser && isLoaded) {
-      const saveMessages = async () => {
-        const path = `users/${currentUser.id}/messages`;
-        try {
-          const userMsgsRef = collection(db, 'users', currentUser.id, 'messages');
-          // We only save new messages or sync all. For simplicity, we sync active chat messages.
-          // In a real app, we'd only save the *new* message when it arrives.
-          for (const chatId in messages) {
-            const chatMsgs = messages[chatId];
-            for (const msg of chatMsgs) {
-              await setDoc(doc(userMsgsRef, msg.id), msg);
-            }
-          }
-        } catch (err: any) {
-          addLog('Failed to save messages to Firebase', 'error', String(err));
-          if (err.code === 'permission-denied') {
-            handleFirestoreError(err, OperationType.WRITE, path);
-          }
-        }
-      };
-      saveMessages();
+    if (currentUser && isLoaded) {
+      saveToStorage(`${storagePrefix}messages`, messages);
     }
-  }, [messages, isFirebaseReady, currentUser, isLoaded]);
+  }, [messages, currentUser, isLoaded]);
 
-  // Load messages from Firebase on startup
+  // Load messages from server on startup
   useEffect(() => {
-    if (isFirebaseReady && currentUser && isLoaded) {
-      const loadFromFirebase = async () => {
-        try {
-          const loadedMsgs: Record<string, Message[]> = {};
-          
-          // Load PMs
-          const userMsgsRef = collection(db, 'users', currentUser.id, 'messages');
-          const q = query(userMsgsRef, orderBy('timestamp', 'asc'));
-          const querySnapshot = await getDocs(q);
-          
-          querySnapshot.forEach((doc) => {
-            const msg = doc.data() as Message;
-            const chatId = msg.isGroup ? msg.receiverId : (msg.senderId === currentUser.id ? msg.receiverId : msg.senderId);
-            if (!loadedMsgs[chatId]) loadedMsgs[chatId] = [];
-            loadedMsgs[chatId].push(msg);
-          });
+    if (socket && currentUser && isLoaded) {
+      socket.emit('get_history', currentUser.id, (history: Message[]) => {
+        const loadedMsgs: Record<string, Message[]> = {};
+        history.forEach(msg => {
+          const chatId = msg.isGroup ? msg.receiverId : (msg.senderId === currentUser.id ? msg.receiverId : msg.senderId);
+          if (!loadedMsgs[chatId]) loadedMsgs[chatId] = [];
+          loadedMsgs[chatId].push(msg);
+        });
 
-          // Load Group Messages
-          for (const group of groups) {
-            const groupMsgsRef = collection(db, 'groups', group.id, 'messages');
-            const gq = query(groupMsgsRef, orderBy('timestamp', 'asc'));
-            const gSnapshot = await getDocs(gq);
-            
-            if (!loadedMsgs[group.id]) loadedMsgs[group.id] = [];
-            gSnapshot.forEach((doc) => {
-              const msg = doc.data() as Message;
-              // Avoid duplicates if already loaded from user path (though group messages should only be in group path now)
-              if (!loadedMsgs[group.id].some(m => m.id === msg.id)) {
-                loadedMsgs[group.id].push(msg);
-              }
-            });
+        setMessages(prev => {
+          const merged = { ...prev };
+          for (const chatId in loadedMsgs) {
+            const existing = merged[chatId] || [];
+            const combined = [...existing, ...loadedMsgs[chatId]];
+            const unique = Array.from(new Map(combined.map(m => [m.id, m])).values());
+            merged[chatId] = unique.sort((a, b) => a.timestamp - b.timestamp);
           }
-          
-          setMessages(prev => {
-            const merged = { ...prev };
-            const newContacts: string[] = [];
-            for (const chatId in loadedMsgs) {
-              const existing = merged[chatId] || [];
-              const combined = [...existing, ...loadedMsgs[chatId]];
-              const unique = Array.from(new Map(combined.map(m => [m.id, m])).values());
-              merged[chatId] = unique.sort((a, b) => a.timestamp - b.timestamp);
-              
-              if (chatId !== 'bot-safems' && !groups.some(g => g.id === chatId)) {
-                newContacts.push(chatId);
-              }
-            }
-            
-            if (newContacts.length > 0) {
-              setContacts(prevContacts => {
-                const combined = [...prevContacts, ...newContacts];
-                return Array.from(new Set(combined));
-              });
-            }
-            
-            return merged;
-          });
-          addLog('Messages synced from Firebase', 'success');
-        } catch (err: any) {
-          addLog('Failed to load messages from Firebase', 'error', String(err));
-        }
-      };
-      loadFromFirebase();
+          return merged;
+        });
+        addLog('Messages synced from server', 'success');
+      });
     }
-  }, [isFirebaseReady, currentUser, isLoaded, groups.length]);
+  }, [socket, currentUser, isLoaded]);
 
   const usersRef = useRef(users);
   useEffect(() => {
@@ -1415,22 +1234,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
         encryptedPrivateKey,
         avatar: user.avatar,
       });
-
-      // Sign in anonymously to Firebase if not already signed in
-      if (!auth.currentUser) {
-        try {
-          await signInAnonymously(auth);
-        } catch (e) {
-          console.error('Anonymous auth failed', e);
-        }
-      }
-
-      // Sync Firebase UID
-      if (db && auth.currentUser) {
-        setDoc(doc(db, 'global_users', user.id), {
-          firebaseUid: auth.currentUser.uid
-        }, { merge: true }).catch(e => console.error('Sync failed', e));
-      }
     } catch (err) {
       addLog('Registration failed', 'error', String(err));
       alert(`${t.regFailed}: ` + (err instanceof Error ? err.message : String(err)));
@@ -1457,15 +1260,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
           alert(`${t.loginFailed}: ` + response.message);
           setIsLoggingIn(false);
           return;
-        }
-
-        // Sign in anonymously to Firebase if not already signed in
-        if (!auth.currentUser) {
-          try {
-            await signInAnonymously(auth);
-          } catch (e) {
-            console.error('Anonymous auth failed', e);
-          }
         }
 
         try {
@@ -1497,13 +1291,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
           setCurrentUser(user);
           setNewDisplayName(user.displayName);
           addLog('Login successful', 'success');
-          
-          // Sync Firebase UID
-          if (db && auth.currentUser) {
-            setDoc(doc(db, 'global_users', user.id), {
-              firebaseUid: auth.currentUser.uid
-            }, { merge: true }).catch(e => console.error('Sync failed', e));
-          }
         } catch (err) {
           addLog('Decryption failed during login', 'error', String(err));
           alert(t.decryptFailed);
