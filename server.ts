@@ -585,10 +585,10 @@ async function startServer() {
     });
 
     // Call Signaling
-    socket.on('call_user', (data: { offer: any; to: string; from: string }) => {
+    socket.on('call_user', (data: { offer: any; to: string; from: string; video?: boolean }) => {
       const receiver = users.get(data.to);
       if (receiver) {
-        receiver.sessions.forEach(s => io.to(s.socketId).emit('incoming_call', { offer: data.offer, from: data.from }));
+        receiver.sessions.forEach(s => io.to(s.socketId).emit('incoming_call', { offer: data.offer, from: data.from, video: data.video }));
       }
     });
 

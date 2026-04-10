@@ -734,7 +734,10 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Initialize socket and load user from local storage
@@ -1065,13 +1068,14 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
     });
 
     // Call Signaling Listeners
-    socket.on('incoming_call', ({ offer, from }) => {
+    socket.on('incoming_call', ({ offer, from, video }) => {
       const caller = usersRef.current.find(u => u.id === from);
       if (caller) {
         setCallPartner(caller);
         setCallStatus('incoming');
         // Store offer for later
         (window as any).pendingOffer = offer;
+        (window as any).callVideoRequested = video;
       }
     });
 
@@ -1633,6 +1637,26 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   };
 
   // Call Functions
+  const formatLastSeen = (timestamp: number) => {
+    if (!timestamp) return t.offline;
+    const now = Date.now();
+    const diff = now - timestamp;
+    
+    if (diff < 60000) return t.online; // Less than a minute
+    
+    const date = new Date(timestamp);
+    const today = new Date();
+    const isToday = date.getDate() === today.getDate() && 
+                    date.getMonth() === today.getMonth() && 
+                    date.getFullYear() === today.getFullYear();
+    
+    if (isToday) {
+      return `${t.lastSeenAt} ${format(timestamp, 'HH:mm')}`;
+    }
+    
+    return `${t.lastSeen} ${format(timestamp, 'dd.MM HH:mm')}`;
+  };
+
   const startCallTimer = () => {
     setCallDuration(0);
     if (callTimerRef.current) clearInterval(callTimerRef.current);
@@ -1660,7 +1684,13 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
   const initPeerConnection = (partnerId: string) => {
     const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+      ]
     });
 
     pc.onicecandidate = (event) => {
@@ -1674,19 +1704,30 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       if (remoteAudioRef.current) {
         remoteAudioRef.current.srcObject = event.streams[0];
       }
+      if (remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = event.streams[0];
+      }
     };
 
     pcRef.current = pc;
     return pc;
   };
 
-  const startCall = async (partner: UserData) => {
+  const startCall = async (partner: UserData, video: boolean = false) => {
     if (!socket || !currentUser) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: video 
+      });
       localStreamRef.current = stream;
+      setIsVideoEnabled(video);
       setCallPartner(partner);
       setCallStatus('calling');
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
       const pc = initPeerConnection(partner.id);
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
@@ -1694,19 +1735,28 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       const offer = await pc.createOffer();
       await pc.setLocalDescription(offer);
 
-      socket.emit('call_user', { offer, to: partner.id, from: currentUser.id });
-      addLog(`Initiating call to ${partner.username}`, 'info');
+      socket.emit('call_user', { offer, to: partner.id, from: currentUser.id, video });
+      addLog(`Initiating ${video ? 'video' : 'audio'} call to ${partner.username}`, 'info');
     } catch (e) {
       console.error('Error starting call', e);
-      alert('Could not access microphone');
+      alert('Could not access media devices');
     }
   };
 
   const acceptCall = async () => {
     if (!socket || !currentUser || !callPartner) return;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const videoRequested = (window as any).callVideoRequested;
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: videoRequested 
+      });
       localStreamRef.current = stream;
+      setIsVideoEnabled(videoRequested);
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
       const pc = initPeerConnection(callPartner.id);
       stream.getTracks().forEach(track => pc.addTrack(track, stream));
@@ -1723,7 +1773,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       addLog(`Call accepted from ${callPartner.username}`, 'info');
     } catch (e) {
       console.error('Error accepting call', e);
-      alert('Could not access microphone');
+      alert('Could not access media devices');
       rejectCall();
     }
   };
@@ -2201,7 +2251,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
             contacts.map(contactId => {
               const user = users.find(u => u.id === contactId) || {
                 id: contactId,
-                username: 'Unknown',
+                username: contactId.substring(0, 8) + '...',
                 publicKey: '',
                 online: false,
                 lastSeen: 0
@@ -2243,8 +2293,8 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-zinc-500 truncate">
-                    {user.online ? t.online : t.offline}
+                  <p className="text-[10px] text-zinc-500 truncate">
+                    {user.online ? t.online : formatLastSeen(user.lastSeen || 0)}
                   </p>
                 </div>
               </button>
@@ -2314,13 +2364,22 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
               <div className="flex items-center gap-1 sm:gap-2">
                 {!activeUser.isGroup && !activeUser.isBot && (
-                  <button
-                    onClick={() => startCall(activeUser as UserData)}
-                    className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all duration-200"
-                    title={t.calling}
-                  >
-                    <Phone className="w-5 h-5" />
-                  </button>
+                  <>
+                    <button
+                      onClick={() => startCall(activeUser as UserData, false)}
+                      className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all duration-200"
+                      title={t.audioCall}
+                    >
+                      <Phone className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={() => startCall(activeUser as UserData, true)}
+                      className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all duration-200"
+                      title={t.videoCall}
+                    >
+                      <Camera className="w-5 h-5" />
+                    </button>
+                  </>
                 )}
                 
                 {activeUser.isGroup && (
@@ -3154,8 +3213,12 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
         />
       )}
 
-      {/* Audio element for WebRTC */}
+      {/* Media elements for WebRTC */}
       <audio ref={remoteAudioRef} autoPlay />
+      <div className="hidden">
+        <video ref={localVideoRef} autoPlay muted playsInline />
+        <video ref={remoteVideoRef} autoPlay playsInline />
+      </div>
 
       {/* Incoming Call Modal */}
       {callStatus === 'incoming' && callPartner && (
@@ -3179,7 +3242,9 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
             </div>
             
             <h3 className="text-2xl font-bold text-white mb-1">{callPartner.displayName || callPartner.username}</h3>
-            <p className="text-emerald-400 text-sm font-medium animate-pulse mb-8 uppercase tracking-widest">{t.incomingCall}</p>
+            <p className="text-emerald-400 text-sm font-medium animate-pulse mb-8 uppercase tracking-widest">
+              {(window as any).callVideoRequested ? t.videoCall : t.audioCall}
+            </p>
             
             <div className="flex gap-4">
               <button
@@ -3204,6 +3269,18 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       {/* Active Call Overlay */}
       {(callStatus === 'active' || callStatus === 'calling') && callPartner && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/95 backdrop-blur-xl">
+          {/* Video Background if enabled */}
+          {isVideoEnabled && (
+            <div className="absolute inset-0 overflow-hidden">
+              <video 
+                ref={remoteVideoRef} 
+                autoPlay 
+                playsInline 
+                className="w-full h-full object-cover opacity-40"
+              />
+              <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-black/50" />
+            </div>
+          )}
           <div className="absolute inset-0 overflow-hidden pointer-events-none">
             <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-emerald-500/5 blur-[120px] rounded-full" />
           </div>
@@ -3213,6 +3290,18 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
             animate={{ opacity: 1, y: 0 }}
             className="relative z-10 max-w-md w-full text-center"
           >
+            {/* Local Video Preview */}
+            {isVideoEnabled && (
+              <div className="absolute top-0 right-0 w-32 aspect-video bg-zinc-900 rounded-xl overflow-hidden border border-white/10 shadow-2xl z-20">
+                <video 
+                  ref={localVideoRef} 
+                  autoPlay 
+                  muted 
+                  playsInline 
+                  className="w-full h-full object-cover"
+                />
+              </div>
+            )}
             <div className="mb-8 relative inline-block">
               <div className="w-32 h-32 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 ring-4 ring-white/5 overflow-hidden mx-auto shadow-2xl">
                 {callPartner.avatar ? (
@@ -3245,6 +3334,22 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
               >
                 {isMuted ? <MicOff className="w-6 h-6" /> : <Mic className="w-6 h-6" />}
               </button>
+
+              {isVideoEnabled && (
+                <button
+                  onClick={() => {
+                    if (localStreamRef.current) {
+                      const videoTrack = localStreamRef.current.getVideoTracks()[0];
+                      if (videoTrack) {
+                        videoTrack.enabled = !videoTrack.enabled;
+                      }
+                    }
+                  }}
+                  className="w-16 h-16 rounded-full bg-white/5 border border-white/10 text-white flex items-center justify-center hover:bg-white/10 transition-all"
+                >
+                  <Camera className="w-6 h-6" />
+                </button>
+              )}
 
               <button
                 onClick={endCall}

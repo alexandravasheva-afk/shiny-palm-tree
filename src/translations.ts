@@ -128,6 +128,10 @@ export const translations = {
     endCall: "End Call",
     mute: "Mute",
     unmute: "Unmute",
+    lastSeen: "Last seen",
+    lastSeenAt: "Last seen at",
+    videoCall: "Video Call",
+    audioCall: "Audio Call",
   },
   ru: {
     welcome: "Добро пожаловать в safeMS",
@@ -256,5 +260,9 @@ export const translations = {
     endCall: "Завершить",
     mute: "Выкл. микрофон",
     unmute: "Вкл. микрофон",
+    lastSeen: "Был(а) в сети",
+    lastSeenAt: "Был(а) в сети в",
+    videoCall: "Видеозвонок",
+    audioCall: "Аудиозвонок",
   }
 };
