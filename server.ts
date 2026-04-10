@@ -7,22 +7,20 @@ import { Server } from "socket.io";
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
-  cors: {
-    origin: "*",
-  },
+  cors: { origin: "*" },
 });
 
-// фикс __dirname для ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// 🔥 путь к dist (ВАЖНО)
+// 🔥 ВАЖНО: сервер уже внутри dist
 const distPath = __dirname;
 
-// ===== SOCKET.IO =====
-io.on("connection", (socket) => {
-  console.log("User connected:", socket.id);
+// ===== 1. СТАТИКА (ПЕРВАЯ!) =====
+app.use(express.static(distPath));
 
+// ===== SOCKET =====
+io.on("connection", (socket) => {
   socket.on("call_user", (data) => {
     io.to(data.to).emit("incoming_call", data);
   });
@@ -34,21 +32,19 @@ io.on("connection", (socket) => {
   socket.on("ice_candidate", (data) => {
     io.to(data.to).emit("ice_candidate", data);
   });
-
-  socket.on("disconnect", () => {
-    console.log("User disconnected:", socket.id);
-  });
 });
 
-// ===== СТАТИКА (САМОЕ ВАЖНОЕ) =====
-app.use(express.static(distPath));
-
-// ===== REACT ROUTING =====
+// ===== 2. ТОЛЬКО ДЛЯ HTML =====
 app.get("*", (req, res) => {
+  // ❗ если это НЕ файл — тогда index.html
+  if (req.path.startsWith("/assets")) {
+    return res.status(404).end();
+  }
+
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-// ===== СТАРТ =====
+// ===== START =====
 const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, () => {
