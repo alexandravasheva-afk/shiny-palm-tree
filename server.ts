@@ -601,11 +601,15 @@ async function startServer() {
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({ server: { middlewareMode: true }, appType: 'spa' });
+    const vite = await createViteServer({ 
+      server: { middlewareMode: true }, 
+      appType: 'spa',
+      root: process.cwd()
+    });
     app.use(vite.middlewares);
-    app.use('*', async (req, res, next) => {
+    app.get('*', async (req, res, next) => {
       const url = req.originalUrl;
-      if (url.startsWith('/api')) return next();
+      if (url.startsWith('/api') || url.includes('.')) return next();
       try {
         let template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
         template = await vite.transformIndexHtml(url, template);
@@ -619,7 +623,8 @@ async function startServer() {
     const distPath = path.resolve(process.cwd(), 'dist');
     const indexPath = path.join(distPath, 'index.html');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('*', (req, res, next) => {
+      if (req.url.includes('.')) return next();
       if (fs.existsSync(indexPath)) res.sendFile(indexPath);
       else res.status(404).send('System Error: index.html not found');
     });
