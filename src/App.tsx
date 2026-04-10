@@ -27,20 +27,6 @@ import {
   decryptWithPassword,
 } from './lib/crypto';
 
-
-const getMedia = async (video: boolean) => {
-  try {
-    if (typeof window === "undefined") return null;
-    return await navigator.mediaDevices.getUserMedia({
-      audio: true,
-      video: video,
-    });
-  } catch (e) {
-    console.error("media error", e);
-    return null;
-  }
-};
-
 // Types
 interface UserData {
   id: string;
@@ -753,6 +739,21 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Sync media streams with video/audio elements
+  useEffect(() => {
+    if (callStatus !== 'idle') {
+      if (localStreamRef.current && localVideoRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+      if (remoteStreamRef.current && remoteVideoRef.current) {
+        remoteVideoRef.current.srcObject = remoteStreamRef.current;
+      }
+      if (remoteStreamRef.current && remoteAudioRef.current) {
+        remoteAudioRef.current.srcObject = remoteStreamRef.current;
+      }
+    }
+  }, [callStatus, isVideoEnabled]);
 
   // Initialize socket and load user from local storage
   useEffect(() => {
@@ -1728,78 +1729,76 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   };
 
   const startCall = async (partner: UserData, video: boolean = false) => {
-  if (!socket || !currentUser) return;
+    if (!socket || !currentUser) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: video 
+      });
+      localStreamRef.current = stream;
+      setIsVideoEnabled(video);
+      setCallPartner(partner);
+      setCallStatus('calling');
 
-  try {
-    const stream = await getMedia(video);
-    if (!stream) return;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
-    localStreamRef.current = stream;
-    setIsVideoEnabled(video);
-    setCallPartner(partner);
-    setCallStatus('calling');
+      const pc = initPeerConnection(partner.id);
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      socket.emit('call_user', { offer, to: partner.id, from: currentUser.id, video });
+      addLog(`Initiating ${video ? 'video' : 'audio'} call to ${partner.username}`, 'info');
+    } catch (e) {
+      console.error('Error starting call', e);
+      alert('Could not access media devices');
     }
-
-    const pc = initPeerConnection(partner.id);
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-
-    socket.emit('call_user', {
-      offer,
-      to: partner.id,
-      from: currentUser.id,
-      video
-    });
-
-    addLog(`Initiating ${video ? 'video' : 'audio'} call to ${partner.username}`, 'info');
-
-  } catch (e) {
-    console.error('Error starting call', e);
-    alert('Не удалось получить доступ к микрофону');
-  }
-};
+  };
 
   const acceptCall = async () => {
-  if (!socket || !currentUser || !callPartner) return;
+    if (!socket || !currentUser || !callPartner) return;
+    try {
+      const videoRequested = (window as any).callVideoRequested;
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        audio: true, 
+        video: videoRequested 
+      });
+      localStreamRef.current = stream;
+      setIsVideoEnabled(videoRequested);
 
-  try {
-    const videoRequested = (window as any).callVideoRequested;
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
 
-    const stream = await getMedia(videoRequested);
-    if (!stream) return;
+      const pc = initPeerConnection(callPartner.id);
+      stream.getTracks().forEach(track => pc.addTrack(track, stream));
 
-    localStreamRef.current = stream;
-    setIsVideoEnabled(videoRequested);
+      const offer = (window as any).pendingOffer;
+      await pc.setRemoteDescription(new RTCSessionDescription(offer));
 
-    if (localVideoRef.current) {
-      localVideoRef.current.srcObject = stream;
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      socket.emit('answer_call', { answer, to: callPartner.id });
+      setCallStatus('active');
+      startCallTimer();
+      addLog(`Call accepted from ${callPartner.username}`, 'info');
+    } catch (e) {
+      console.error('Error accepting call', e);
+      alert('Could not access media devices');
+      rejectCall();
     }
+  };
 
-    const pc = initPeerConnection(callPartner.id);
-    stream.getTracks().forEach(track => pc.addTrack(track, stream));
-
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-
-    socket.emit('answer_call', {
-      answer,
-      to: callPartner.id,
-      from: currentUser.id
-    });
-
-    setCallStatus('connected');
-    addLog(`Call accepted from ${callPartner.username}`, 'success');
-
-  } catch (e) {
-    console.error('Error accepting call', e);
-    alert('Ошибка доступа к микрофону');
-  }
-};
+  const rejectCall = () => {
+    if (socket && callPartner) {
+      socket.emit('reject_call', { to: callPartner.id });
+    }
+    cleanupCall();
+  };
 
   const endCall = () => {
     if (socket && callPartner) {
@@ -3231,10 +3230,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
       {/* Media elements for WebRTC */}
       <audio ref={remoteAudioRef} autoPlay />
-      <div className="hidden">
-        <video ref={localVideoRef} autoPlay muted playsInline />
-        <video ref={remoteVideoRef} autoPlay playsInline />
-      </div>
 
       {/* Incoming Call Modal */}
       {callStatus === 'incoming' && callPartner && (
@@ -3393,7 +3388,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                 ))}
               </div>
               <p className="text-[10px] text-zinc-600 uppercase tracking-widest font-bold flex items-center gap-2">
-                <ShieldCheck className="w-3 h-3" /> Encrypted Voice Channel
+                <ShieldCheck className="w-3 h-3" /> Secure Encrypted Channel
               </p>
             </div>
           </motion.div>
