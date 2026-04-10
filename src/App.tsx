@@ -27,6 +27,20 @@ import {
   decryptWithPassword,
 } from './lib/crypto';
 
+
+const getMedia = async (video: boolean) => {
+  try {
+    if (typeof window === "undefined") return null;
+    return await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      video: video,
+    });
+  } catch (e) {
+    console.error("media error", e);
+    return null;
+  }
+};
+
 // Types
 interface UserData {
   id: string;
@@ -1714,76 +1728,78 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   };
 
   const startCall = async (partner: UserData, video: boolean = false) => {
-    if (!socket || !currentUser) return;
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: true, 
-        video: video 
-      });
-      localStreamRef.current = stream;
-      setIsVideoEnabled(video);
-      setCallPartner(partner);
-      setCallStatus('calling');
+  if (!socket || !currentUser) return;
 
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
+  try {
+    const stream = await getMedia(video);
+    if (!stream) return;
 
-      const pc = initPeerConnection(partner.id);
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    localStreamRef.current = stream;
+    setIsVideoEnabled(video);
+    setCallPartner(partner);
+    setCallStatus('calling');
 
-      const offer = await pc.createOffer();
-      await pc.setLocalDescription(offer);
-
-      socket.emit('call_user', { offer, to: partner.id, from: currentUser.id, video });
-      addLog(`Initiating ${video ? 'video' : 'audio'} call to ${partner.username}`, 'info');
-    } catch (e) {
-      console.error('Error starting call', e);
-      alert('Could not access media devices');
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
     }
-  };
+
+    const pc = initPeerConnection(partner.id);
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+
+    socket.emit('call_user', {
+      offer,
+      to: partner.id,
+      from: currentUser.id,
+      video
+    });
+
+    addLog(`Initiating ${video ? 'video' : 'audio'} call to ${partner.username}`, 'info');
+
+  } catch (e) {
+    console.error('Error starting call', e);
+    alert('Не удалось получить доступ к микрофону');
+  }
+};
 
   const acceptCall = async () => {
-    if (!socket || !currentUser || !callPartner) return;
-    try {
-      const videoRequested = (window as any).callVideoRequested;
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        audio: true, 
-        video: videoRequested 
-      });
-      localStreamRef.current = stream;
-      setIsVideoEnabled(videoRequested);
+  if (!socket || !currentUser || !callPartner) return;
 
-      if (localVideoRef.current) {
-        localVideoRef.current.srcObject = stream;
-      }
+  try {
+    const videoRequested = (window as any).callVideoRequested;
 
-      const pc = initPeerConnection(callPartner.id);
-      stream.getTracks().forEach(track => pc.addTrack(track, stream));
+    const stream = await getMedia(videoRequested);
+    if (!stream) return;
 
-      const offer = (window as any).pendingOffer;
-      await pc.setRemoteDescription(new RTCSessionDescription(offer));
+    localStreamRef.current = stream;
+    setIsVideoEnabled(videoRequested);
 
-      const answer = await pc.createAnswer();
-      await pc.setLocalDescription(answer);
-
-      socket.emit('answer_call', { answer, to: callPartner.id });
-      setCallStatus('active');
-      startCallTimer();
-      addLog(`Call accepted from ${callPartner.username}`, 'info');
-    } catch (e) {
-      console.error('Error accepting call', e);
-      alert('Could not access media devices');
-      rejectCall();
+    if (localVideoRef.current) {
+      localVideoRef.current.srcObject = stream;
     }
-  };
 
-  const rejectCall = () => {
-    if (socket && callPartner) {
-      socket.emit('reject_call', { to: callPartner.id });
-    }
-    cleanupCall();
-  };
+    const pc = initPeerConnection(callPartner.id);
+    stream.getTracks().forEach(track => pc.addTrack(track, stream));
+
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+
+    socket.emit('answer_call', {
+      answer,
+      to: callPartner.id,
+      from: currentUser.id
+    });
+
+    setCallStatus('connected');
+    addLog(`Call accepted from ${callPartner.username}`, 'success');
+
+  } catch (e) {
+    console.error('Error accepting call', e);
+    alert('Ошибка доступа к микрофону');
+  }
+};
 
   const endCall = () => {
     if (socket && callPartner) {
