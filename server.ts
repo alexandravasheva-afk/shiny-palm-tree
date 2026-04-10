@@ -372,11 +372,14 @@ async function startServer() {
           const snapshot = await db.collection('global_users').where('username', '==', searchUsername).get();
           if (!snapshot.empty) {
             const userData = snapshot.docs[0].data();
-            userId = userData.id;
-            console.log(`Found user "${searchUsername}" in Firestore via Admin SDK. ID: ${userId}`);
-            // Update memory
-            users.set(userId, { ...userData, sessions: [], lastSeen: Date.now() } as ServerUser);
-            usernameToId.set(userData.username, userId);
+            const foundUserId = userData.id;
+            if (foundUserId && userData.username) {
+              userId = foundUserId;
+              console.log(`Found user "${searchUsername}" in Firestore via Admin SDK. ID: ${userId}`);
+              // Update memory
+              users.set(foundUserId, { ...userData, sessions: [], lastSeen: Date.now() } as ServerUser);
+              usernameToId.set(userData.username, foundUserId);
+            }
           }
         } catch (err) {
           console.warn('Firestore lookup failed during login via Admin SDK:', err);
@@ -435,7 +438,9 @@ async function startServer() {
 
       // Notify active bots
       activeBots.forEach((botProcess, botId) => {
-        botProcess.stdin.write(JSON.stringify({ type: 'message', ...data }) + '\n');
+        if (botProcess.stdin) {
+          botProcess.stdin.write(JSON.stringify({ type: 'message', ...data }) + '\n');
+        }
       });
     });
 
@@ -576,7 +581,9 @@ async function startServer() {
 
       // Notify active bots
       activeBots.forEach((botProcess, botId) => {
-        botProcess.stdin.write(JSON.stringify({ type: 'group_message', ...data }) + '\n');
+        if (botProcess.stdin) {
+          botProcess.stdin.write(JSON.stringify({ type: 'group_message', ...data }) + '\n');
+        }
       });
     });
 
