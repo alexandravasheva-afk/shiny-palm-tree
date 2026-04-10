@@ -3,7 +3,12 @@ import { Server } from 'socket.io';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
 import { spawn, ChildProcess } from 'child_process';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Catch unhandled errors to prevent silent crashes in production
 process.on('uncaughtException', (err) => {
@@ -609,7 +614,10 @@ async function startServer() {
     app.use(vite.middlewares);
     app.get('*', async (req, res, next) => {
       const url = req.originalUrl;
-      if (url.startsWith('/api') || url.includes('.')) return next();
+      // Only serve index.html for navigation requests that accept HTML
+      if (url.startsWith('/api') || url.includes('.') || !req.accepts('html')) {
+        return next();
+      }
       try {
         let template = fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8');
         template = await vite.transformIndexHtml(url, template);
@@ -620,11 +628,23 @@ async function startServer() {
       }
     });
   } else {
-    const distPath = path.resolve(process.cwd(), 'dist');
+    // In production, server.js is in the dist folder
+    const distPath = __dirname;
     const indexPath = path.join(distPath, 'index.html');
+    
+    // Serve static files from dist
     app.use(express.static(distPath));
+    
+    // Explicitly handle assets to prevent SPA fallback for missing files
+    app.use('/assets', express.static(path.join(distPath, 'assets'), {
+      fallthrough: false
+    }));
+
     app.get('*', (req, res, next) => {
-      if (req.url.includes('.')) return next();
+      // Only serve index.html for navigation requests that accept HTML
+      if (req.url.includes('.') || !req.accepts('html')) {
+        return next();
+      }
       if (fs.existsSync(indexPath)) res.sendFile(indexPath);
       else res.status(404).send('System Error: index.html not found');
     });
