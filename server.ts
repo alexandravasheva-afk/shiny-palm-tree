@@ -41,6 +41,7 @@ async function startServer() {
   });
 
   const PORT = 3000;
+  let dbLoaded = false;
 
   // In-memory store for users and messages
   interface Session {
@@ -93,6 +94,7 @@ async function startServer() {
 
   // Persistence logic
   const saveDB = () => {
+    if (!dbLoaded) return;
     try {
       const data = {
         users: Array.from(users.values()).map(u => {
@@ -128,10 +130,13 @@ async function startServer() {
         if (data.messages) {
           allMessages.push(...data.messages);
         }
+        dbLoaded = true;
         console.log(`Loaded data from db.json: ${users.size} users, ${groups.size} groups, ${allMessages.length} messages`);
       } catch (e) {
         console.error('Failed to load database:', e);
       }
+    } else {
+      dbLoaded = true;
     }
   };
 
@@ -633,6 +638,9 @@ async function startServer() {
       
       // Для всех остальных навигационных запросов отдаем index.html
       const indexPath = path.join(distPath, 'index.html');
+      res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.set('Pragma', 'no-cache');
+      res.set('Expires', '0');
       res.sendFile(indexPath);
     });
   } else {
