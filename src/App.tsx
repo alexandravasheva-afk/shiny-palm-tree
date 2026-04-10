@@ -642,6 +642,15 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const [isVideoEnabled, setIsVideoEnabled] = useState(true);
   const callTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const notificationSoundRef = useRef<HTMLAudioElement | null>(null);
+  const ringtoneSoundRef = useRef<HTMLAudioElement | null>(null);
+
+  const stopRingtone = () => {
+    if (ringtoneSoundRef.current) {
+      ringtoneSoundRef.current.pause();
+      ringtoneSoundRef.current.currentTime = 0;
+    }
+  };
 
   // Sync media streams with video/audio elements
   useEffect(() => {
@@ -824,6 +833,12 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
     });
 
     socket.on('message', async (payload: any) => {
+      // Play notification sound
+      if (notificationSoundRef.current) {
+        notificationSoundRef.current.currentTime = 0;
+        notificationSoundRef.current.play().catch(e => console.warn('Failed to play notification sound:', e));
+      }
+
       try {
         // Handle bot or system messages (not encrypted)
         if (payload.senderId === 'bot-safems' || payload.isSystem || payload.isGroup) {
@@ -910,6 +925,14 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       if (caller) {
         setCallPartner(caller);
         setCallStatus('incoming');
+        
+        // Play ringtone
+        if (ringtoneSoundRef.current) {
+          ringtoneSoundRef.current.currentTime = 0;
+          ringtoneSoundRef.current.loop = true;
+          ringtoneSoundRef.current.play().catch(e => console.warn('Failed to play ringtone:', e));
+        }
+
         // Store offer for later
         (window as any).pendingOffer = offer;
         (window as any).callVideoRequested = video;
@@ -1471,6 +1494,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   };
 
   const cleanupCall = () => {
+    stopRingtone();
     if (callTimerRef.current) clearInterval(callTimerRef.current);
     if (pcRef.current) {
       pcRef.current.close();
@@ -1550,6 +1574,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
   const acceptCall = async () => {
     if (!socket || !currentUser || !callPartner) return;
+    stopRingtone();
     try {
       const videoRequested = (window as any).callVideoRequested;
       const stream = await navigator.mediaDevices.getUserMedia({ 
@@ -3020,6 +3045,8 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
       {/* Media elements for WebRTC */}
       <audio ref={remoteAudioRef} autoPlay />
+      <audio ref={notificationSoundRef} src="/notification.mp3" preload="auto" />
+      <audio ref={ringtoneSoundRef} src="/ringtone.mp3" preload="auto" />
 
       {/* Incoming Call Modal */}
       {callStatus === 'incoming' && callPartner && (
