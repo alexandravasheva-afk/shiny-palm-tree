@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef, Component } from 'react';
-console.log("safeMS App.tsx script executing...");
 import { io, Socket } from 'socket.io-client';
 import { v4 as uuidv4 } from 'uuid';
 import { format } from 'date-fns';
@@ -26,6 +25,10 @@ import {
   encryptWithPassword,
   decryptWithPassword,
 } from './lib/crypto';
+
+console.log("safeMS App.tsx script executing...");
+
+const APP_URL = (process.env.SHARED_APP_URL as string) || (process.env.APP_URL as string) || (typeof window !== 'undefined' ? window.location.origin : '');
 
 // Types
 interface UserData {
@@ -2090,7 +2093,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
             </p>
             <div className="bg-white p-3 rounded-xl inline-block mx-auto shadow-lg ring-1 ring-black/5">
               <QRCodeSVG 
-                value={process.env.SHARED_APP_URL || process.env.APP_URL || window.location.origin} 
+                value={APP_URL} 
                 size={128} 
                 level="H"
                 includeMargin={true}
@@ -2687,7 +2690,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                 </h3>
                 <div className="bg-white p-3 rounded-xl inline-block mx-auto shadow-lg ring-1 ring-black/5">
                   <QRCodeSVG 
-                    value={process.env.SHARED_APP_URL || process.env.APP_URL || window.location.origin} 
+                    value={APP_URL} 
                     size={160} 
                     level="H"
                     includeMargin={true}
@@ -2696,12 +2699,12 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                 <div className="flex items-center gap-2 mt-2">
                   <input 
                     readOnly 
-                    value={process.env.SHARED_APP_URL || process.env.APP_URL || window.location.origin}
+                    value={APP_URL}
                     className="flex-1 bg-black/30 border border-white/5 rounded-lg px-2 py-1 text-[10px] text-zinc-400 truncate"
                   />
                   <button 
                     onClick={() => {
-                      navigator.clipboard.writeText(process.env.SHARED_APP_URL || process.env.APP_URL || window.location.origin);
+                      navigator.clipboard.writeText(APP_URL);
                       setCopySuccess(true);
                       setTimeout(() => setCopySuccess(false), 2000);
                     }}
