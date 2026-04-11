@@ -61,6 +61,7 @@ async function startServer() {
     role?: string;
     sessions: Session[];
     lastSeen: number;
+    contacts: string[]; // Added contacts list
   }
 
   interface Group {
@@ -105,7 +106,9 @@ async function startServer() {
         offlineMessages: Array.from(offlineMessages.entries()),
         messages: allMessages
       };
-      fs.writeFileSync(DB_PATH, JSON.stringify(data, null, 2));
+      const tempPath = DB_PATH + '.tmp';
+      fs.writeFileSync(tempPath, JSON.stringify(data, null, 2));
+      fs.renameSync(tempPath, DB_PATH);
     } catch (e) {
       console.warn('Warning: Failed to save database (filesystem might be read-only):', e);
     }
@@ -154,7 +157,8 @@ async function startServer() {
       avatar: 'https://api.dicebear.com/7.x/bottts/svg?seed=admin',
       sessions: [],
       lastSeen: Date.now(),
-      role: 'admin'
+      role: 'admin',
+      contacts: []
     });
     usernameToId.set('admin', 'admin');
     saveDB();
@@ -274,6 +278,11 @@ async function startServer() {
       lastSeen: u.lastSeen
     })));
 
+    socket.on('check_username', (username: string, callback: (available: boolean) => void) => {
+      const existingId = usernameToId.get(username);
+      callback(!existingId);
+    });
+
     socket.on('register', async (data: { 
       id: string; 
       username: string; 
@@ -284,13 +293,15 @@ async function startServer() {
       avatar?: string; 
       deviceModel?: string 
     }) => {
+      // Check if username is taken by another ID
+      const existingId = usernameToId.get(data.username);
+      if (existingId && existingId !== data.id) {
+        socket.emit('error', { message: 'Username already taken' });
+        return;
+      }
+
       let user = users.get(data.id);
       if (!user) {
-        const existingId = usernameToId.get(data.username);
-        if (existingId && existingId !== data.id) {
-          socket.emit('error', { message: 'Username already taken' });
-          return;
-        }
         user = { 
           id: data.id, 
           username: data.username, 
@@ -301,11 +312,17 @@ async function startServer() {
           avatar: data.avatar, 
           role: data.username === 'admin' ? 'admin' : 'user',
           sessions: [], 
-          lastSeen: Date.now() 
+          lastSeen: Date.now(),
+          contacts: [] // Initialize contacts
         };
         users.set(data.id, user);
         usernameToId.set(data.username, data.id);
       } else {
+        // If updating username, update the map
+        if (user.username !== data.username) {
+          usernameToId.delete(user.username);
+          usernameToId.set(data.username, data.id);
+        }
         user.publicKey = data.publicKey;
         user.username = data.username;
         if (data.passwordHash) user.passwordHash = data.passwordHash;
@@ -355,9 +372,40 @@ async function startServer() {
           displayName: user.displayName,
           publicKey: user.publicKey,
           encryptedPrivateKey: user.encryptedPrivateKey,
-          avatar: user.avatar
+          avatar: user.avatar,
+          contacts: user.contacts || []
         } 
       });
+    });
+
+    socket.on('check_username', (username: string, callback: (available: boolean) => void) => {
+      callback(!usernameToId.has(username));
+    });
+
+    socket.on('search_user', (username: string, callback: (user: any) => void) => {
+      const id = usernameToId.get(username);
+      if (id) {
+        const u = users.get(id);
+        if (u) {
+          callback({
+            id: u.id,
+            username: u.username,
+            displayName: u.displayName,
+            publicKey: u.publicKey,
+            avatar: u.avatar
+          });
+          return;
+        }
+      }
+      callback(null);
+    });
+
+    socket.on('sync_contacts', ({ userId, contacts }) => {
+      const user = users.get(userId);
+      if (user) {
+        user.contacts = contacts;
+        saveDB();
+      }
     });
 
     socket.on('message', async (data: Message) => {
@@ -366,9 +414,11 @@ async function startServer() {
       allMessages.push(data);
       saveDB();
 
-      if (receiver && receiver.sessions.length > 0) {
-        receiver.sessions.forEach(s => io.to(s.socketId).emit('message', data));
-      } else {
+      // Emit to the receiver's room (handles all their active sessions)
+      io.to(data.receiverId).emit('message', data);
+      
+      // If receiver is offline, store in offline messages
+      if (!receiver || receiver.sessions.length === 0) {
         const pending = offlineMessages.get(data.receiverId) || [];
         pending.push(data);
         offlineMessages.set(data.receiverId, pending);

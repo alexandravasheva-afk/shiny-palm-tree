@@ -5,7 +5,8 @@ import { format } from 'date-fns';
 import { QRCodeSVG } from 'qrcode.react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 import { motion } from 'motion/react';
-import { Shield, ShieldCheck, Send, User, Lock, Key, MessageSquare, LogOut, Check, CheckCheck, Settings, UserPlus, Copy, X, SplitSquareHorizontal, Trash2, ArrowLeft, Paperclip, Bot, Monitor, File, Download, Smartphone, RefreshCw, Trash, Camera, AlertTriangle, Eye, EyeOff, BadgeCheck, QrCode, Users, Link, Phone, PhoneOff, Mic, MicOff } from 'lucide-react';
+import { Shield, ShieldCheck, Send, User, Lock, Key, MessageSquare, LogOut, Check, CheckCheck, Settings, UserPlus, Copy, X, SplitSquareHorizontal, Trash2, ArrowLeft, Paperclip, Bot, Monitor, File, Download, Smartphone, RefreshCw, Trash, Camera, AlertTriangle, Eye, EyeOff, BadgeCheck, QrCode, Users, Link, Phone, PhoneOff, Mic, MicOff, Menu, Smile, Plus } from 'lucide-react';
+import EmojiPicker, { Theme as EmojiTheme, EmojiStyle } from 'emoji-picker-react';
 import { cn } from './lib/utils';
 import { translations, Language } from './translations';
 import {
@@ -41,6 +42,7 @@ interface UserData {
   isBot?: boolean;
   members?: string[];
   adminId?: string;
+  isNotFound?: boolean;
 }
 
 interface LogEntry {
@@ -289,14 +291,14 @@ const MessageItem = React.memo(({ msg, activeUser, showAvatar }: { msg: Message,
   return (
     <div
       className={cn(
-        "flex gap-3 max-w-[85%]",
-        msg.isSent ? "ml-auto flex-row-reverse" : ""
+        "flex gap-2 max-w-[85%] group",
+        msg.isSent ? "ml-auto flex-row-reverse" : "flex-row"
       )}
     >
-      {!msg.isSent && (
-        <div className="w-8 flex-shrink-0">
+      {!msg.isSent && isGroup && (
+        <div className="w-8 flex-shrink-0 self-end mb-1">
           {showAvatar && (
-            <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-xs font-medium text-zinc-400 uppercase overflow-hidden">
+            <div className="w-8 h-8 rounded-full bg-zinc-800 flex items-center justify-center text-[10px] font-bold text-zinc-400 uppercase overflow-hidden ring-1 ring-white/5">
               {activeUser.avatar ? (
                 <img src={activeUser.avatar} alt={activeUser.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
               ) : (
@@ -308,34 +310,36 @@ const MessageItem = React.memo(({ msg, activeUser, showAvatar }: { msg: Message,
       )}
       
       <div className={cn(
-        "flex flex-col min-w-0",
+        "relative flex flex-col min-w-[60px] max-w-full",
         msg.isSent ? "items-end" : "items-start"
       )}>
         {isGroup && !msg.isSent && showAvatar && (
-          <span className="text-[10px] text-emerald-500 font-medium mb-1 ml-1">
-            {msg.senderId.substring(0, 8)}...
+          <span className="text-[11px] text-emerald-500 font-bold mb-0.5 ml-2">
+            {msg.senderId.substring(0, 8)}
           </span>
         )}
         <div
           className={cn(
-            "px-4 py-2.5 rounded-2xl text-[15px] leading-relaxed break-words whitespace-pre-wrap max-w-full",
+            "px-3 py-1.5 rounded-2xl text-[14px] leading-snug break-words whitespace-pre-wrap shadow-sm relative",
             msg.isSent
-              ? "bg-emerald-600 text-white rounded-tr-sm"
-              : "bg-[#1e1e1e] text-zinc-200 rounded-tl-sm border border-white/5"
+              ? "bg-[#2b5278] text-white rounded-br-none"
+              : "bg-[#182533] text-zinc-100 rounded-bl-none border border-white/5"
           )}
         >
           {msg.type === 'file' ? (
             <FileAttachment msg={msg} />
           ) : (
-            msg.content
-          )}
-        </div>
-        <div className="flex items-center gap-1 mt-1 px-1">
-          <span className="text-[10px] text-zinc-500">
-            {format(msg.timestamp, 'HH:mm')}
-          </span>
-          {msg.isSent && (
-            <CheckCheck className="w-3 h-3 text-emerald-500/70" />
+            <div className="flex flex-col">
+              <span>{msg.content}</span>
+              <div className="flex items-center justify-end gap-1 -mb-0.5 mt-0.5 ml-2 self-end">
+                <span className="text-[9px] text-zinc-400/80 font-medium">
+                  {format(msg.timestamp, 'HH:mm')}
+                </span>
+                {msg.isSent && (
+                  <CheckCheck className="w-3 h-3 text-emerald-400/80" />
+                )}
+              </div>
+            </div>
           )}
         </div>
       </div>
@@ -402,6 +406,10 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [inputText, setInputText] = useState('');
   const [isBotTyping, setIsBotTyping] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [contactKeyInput, setContactKeyInput] = useState('');
+  const [copySuccess, setCopySuccess] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
   const [language, setLanguage] = useState<Language>(() => {
     const saved = localStorage.getItem('safems_lang');
     return (saved as Language) || 'ru';
@@ -444,6 +452,10 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
         reply = "safeMS — это защищенный мессенджер. Все ваши сообщения шифруются прямо на вашем устройстве (RSA + AES) и расшифровываются только у получателя. Мы не храним ваши ключи на сервере.";
       } else if (lowerText.includes('удалить')) {
         reply = "Чтобы удалить свои данные, нажмите на значок шестеренки (Настройки) в левом нижнем углу и выберите «Delete Account» или «Clear Contacts & Chats».";
+      } else if (lowerText.includes('групп')) {
+        reply = "👥 **Групповые чаты**\n\nВы можете создавать группы, нажав на иконку «+» в верхней части боковой панели. \n\nПосле создания группы вы получите ссылку-приглашение, которую можно отправить друзьям. Все сообщения в группах также защищены шифрованием.";
+      } else if (lowerText.includes('контакт')) {
+        reply = "👤 **Добавление контактов**\n\nЧтобы добавить друга, просто введите его имя пользователя в строку поиска в верхней части боковой панели. \n\nМы больше не используем длинные ключи чата — теперь всё работает по никнеймам!";
       } else if (lowerText.includes('устроен') || lowerText.includes('файлы') || lowerText.includes('на чем') || lowerText.includes('архитектура')) {
         reply = "🏗️ **Архитектура safeMS**\n\nМессенджер построен на современных технологиях:\n\n🔹 **Frontend:** React + TypeScript. Это обеспечивает быструю и надежную работу интерфейса.\n🔹 **Стиль:** Tailwind CSS для современного и адаптивного дизайна.\n🔹 **Real-time:** Socket.io для мгновенной передачи сообщений.\n🔹 **Шифрование:** Web Crypto API. Используются алгоритмы RSA (для обмена ключами) и AES (для самих сообщений).\n\n📂 **Основные файлы проекта:**\n• `App.tsx` — «сердце» приложения, здесь вся логика интерфейса и шифрования.\n• `server.ts` — серверная часть, отвечающая за передачу зашифрованных пакетов между пользователями.\n• `package.json` — список всех библиотек и инструментов.\n• `index.css` — настройки внешнего вида и тем.\n\nВся переписка хранится только в памяти вашего браузера (LocalStorage), сервер лишь передает зашифрованные данные.";
       }
@@ -474,6 +486,13 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   const [regUsername, setRegUsername] = useState('');
   const [regPassword, setRegPassword] = useState(''); // Added password for registration
   const [contacts, setContacts] = useState<string[]>([]);
+  const [contactInfo, setContactInfo] = useState<Record<string, UserData>>(() => {
+    const saved = loadFromStorage(`${storagePrefix}contact_info`);
+    return saved || {};
+  });
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<UserData[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
   const [groups, setGroups] = useState<Group[]>([]);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [groupNameInput, setGroupNameInput] = useState('');
@@ -620,11 +639,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
     sharedKeyCache.current.set(cacheKey, sharedKey);
     return sharedKey;
   };
-  const [showAddContact, setShowAddContact] = useState(false);
-  const [showQrScanner, setShowQrScanner] = useState(false);
-  const [contactKeyInput, setContactKeyInput] = useState('');
-  const [copySuccess, setCopySuccess] = useState(false);
-  const [isLoaded, setIsLoaded] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
@@ -720,8 +734,11 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   useEffect(() => {
     if (isLoaded) {
       saveToStorage(`${storagePrefix}contacts`, contacts);
+      if (socket && currentUser) {
+        socket.emit('sync_contacts', { userId: currentUser.id, contacts });
+      }
     }
-  }, [contacts, isLoaded, storagePrefix]);
+  }, [contacts, isLoaded, storagePrefix, socket, currentUser]);
 
   // Save messages to local storage (optional, as server now persists)
   useEffect(() => {
@@ -1023,14 +1040,37 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
     }
   };
 
-  const handleAddContact = (e: React.FormEvent) => {
-    e.preventDefault();
-    const key = (contactKeyInput || '').trim();
-    if (key && key !== currentUser?.id && !contacts.includes(key)) {
-      setContacts(prev => [...prev, key]);
-      setShowAddContact(false);
-      setContactKeyInput('');
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    if (!query.trim() || !socket) {
+      setSearchResults([]);
+      return;
     }
+    setIsSearching(true);
+    socket.emit('search_user', query.trim(), (user: UserData | null) => {
+      setIsSearching(false);
+      if (user) {
+        setSearchResults([user]);
+      } else {
+        setSearchResults([]);
+      }
+    });
+  };
+
+  const handleAddContact = (user: UserData) => {
+    if (!contacts.includes(user.id)) {
+      setContacts(prev => [...prev, user.id]);
+    }
+    setContactInfo(prev => ({ ...prev, [user.id]: user }));
+    setSearchQuery('');
+    setSearchResults([]);
+    setActiveChat(user.id);
+  };
+
+  const handleDeleteContact = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setContacts(prev => prev.filter(c => c !== id));
+    if (activeChat === id) setActiveChat(null);
   };
 
   const handleDeleteAccount = () => {
@@ -1219,50 +1259,59 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       return;
     }
     setIsRegistering(true);
-    addLog(`Starting registration for ${regUsername}`, 'info');
+    addLog(`Checking availability for ${regUsername}`, 'info');
 
-    try {
-      const keyPair = await generateKeyPair();
-      const pubKeyBase64 = await exportPublicKey(keyPair.publicKey);
-      const privKeyBase64 = await exportPrivateKey(keyPair.privateKey);
-      
-      const passwordHash = await hashString(regPassword.trim());
-      const encryptedPrivateKey = await encryptWithPassword(privKeyBase64, regPassword.trim());
-      
-      const id = uuidv4();
+    socket.emit('check_username', regUsername.trim(), async (available: boolean) => {
+      if (!available) {
+        addLog('Username already taken', 'error');
+        alert('Username already taken');
+        setIsRegistering(false);
+        return;
+      }
 
-      const user = { id, username: regUsername.trim(), displayName: regUsername.trim(), avatar: undefined, keyPair };
-      
-      // Save to obfuscated local storage
-      saveToStorage(`${storagePrefix}user`, {
-        id,
-        username: user.username,
-        displayName: user.displayName,
-        avatar: user.avatar,
-        publicKeyBase64: pubKeyBase64,
-        privateKeyBase64: privKeyBase64,
-        password: regPassword.trim()
-      });
+      try {
+        const keyPair = await generateKeyPair();
+        const pubKeyBase64 = await exportPublicKey(keyPair.publicKey);
+        const privKeyBase64 = await exportPrivateKey(keyPair.privateKey);
+        
+        const passwordHash = await hashString(regPassword.trim());
+        const encryptedPrivateKey = await encryptWithPassword(privKeyBase64, regPassword.trim());
+        
+        const id = uuidv4();
 
-      setCurrentUser(user);
-      setNewDisplayName(user.displayName);
-      addLog('Registration successful', 'success');
+        const user = { id, username: regUsername.trim(), displayName: regUsername.trim(), avatar: undefined, keyPair };
+        
+        // Save to obfuscated local storage
+        saveToStorage(`${storagePrefix}user`, {
+          id,
+          username: user.username,
+          displayName: user.displayName,
+          avatar: user.avatar,
+          publicKeyBase64: pubKeyBase64,
+          privateKeyBase64: privKeyBase64,
+          password: regPassword.trim()
+        });
 
-      socket.emit('register', {
-        id: user.id,
-        username: user.username,
-        displayName: user.displayName,
-        publicKey: pubKeyBase64,
-        passwordHash,
-        encryptedPrivateKey,
-        avatar: user.avatar,
-      });
-    } catch (err) {
-      addLog('Registration failed', 'error', String(err));
-      alert(`${t.regFailed}: ` + (err instanceof Error ? err.message : String(err)));
-    } finally {
-      setIsRegistering(false);
-    }
+        setCurrentUser(user);
+        setNewDisplayName(user.displayName);
+        addLog('Registration successful', 'success');
+
+        socket.emit('register', {
+          id: user.id,
+          username: user.username,
+          displayName: user.displayName,
+          publicKey: pubKeyBase64,
+          passwordHash,
+          encryptedPrivateKey,
+          avatar: user.avatar,
+        });
+      } catch (err) {
+        addLog('Registration failed', 'error', String(err));
+        alert(`${t.regFailed}: ` + (err instanceof Error ? err.message : String(err)));
+      } finally {
+        setIsRegistering(false);
+      }
+    });
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -1310,6 +1359,11 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
             privateKeyBase64: privKeyBase64,
             password: regPassword.trim()
           });
+
+          if (userData.contacts && Array.isArray(userData.contacts)) {
+            setContacts(userData.contacts);
+            saveToStorage(`${storagePrefix}contacts`, userData.contacts);
+          }
 
           setCurrentUser(user);
           setNewDisplayName(user.displayName);
@@ -1378,8 +1432,11 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       return;
     }
 
-    const receiver = users.find(u => u.id === activeChat);
-    if (!receiver) return;
+    const receiver = users.find(u => u.id === activeChat) || contactInfo[activeChat];
+    if (!receiver || !receiver.publicKey) {
+      addLog('Cannot send message: recipient public key unknown', 'error');
+      return;
+    }
 
     setIsSending(true);
     try {
@@ -1697,17 +1754,17 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
   if (!currentUser) {
     return (
-      <div className="h-full w-full bg-[#0a0a0a] text-zinc-100 flex items-center justify-center p-4 font-sans selection:bg-emerald-500/30 relative">
+      <div className="h-full w-full bg-[#313338] text-zinc-100 flex items-center justify-center p-4 font-sans selection:bg-[#5865F2]/30 relative">
         <div className="absolute top-4 right-4 flex gap-2 z-50">
           <button 
             onClick={() => handleLanguageChange('ru')} 
-            className={cn("px-2 py-1 text-[10px] font-bold rounded border transition-all", language === 'ru' ? "bg-emerald-500 text-black border-emerald-500" : "text-zinc-500 border-white/10 hover:border-white/20")}
+            className={cn("px-2 py-1 text-[10px] font-bold rounded border transition-all", language === 'ru' ? "bg-[#5865F2] text-white border-[#5865F2]" : "text-zinc-500 border-white/10 hover:border-white/20")}
           >
             RU
           </button>
           <button 
             onClick={() => handleLanguageChange('en')} 
-            className={cn("px-2 py-1 text-[10px] font-bold rounded border transition-all", language === 'en' ? "bg-emerald-500 text-black border-emerald-500" : "text-zinc-500 border-white/10 hover:border-white/20")}
+            className={cn("px-2 py-1 text-[10px] font-bold rounded border transition-all", language === 'en' ? "bg-[#5865F2] text-white border-[#5865F2]" : "text-zinc-500 border-white/10 hover:border-white/20")}
           >
             EN
           </button>
@@ -1717,205 +1774,146 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
             <ArrowLeft className="w-4 h-4" /> {t.cancel}
           </button>
         )}
-        <div className="max-w-md w-full space-y-8 bg-[#121212] p-8 rounded-2xl border border-white/5 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full h-32 bg-emerald-500/10 blur-[60px] rounded-full pointer-events-none" />
-          
+        <div className="max-w-[480px] w-full space-y-6 bg-[#2b2d31] p-8 rounded-lg shadow-2xl relative overflow-hidden">
           <div className="text-center space-y-2 relative z-10">
-            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-emerald-500/10 text-emerald-400 mb-4 ring-1 ring-emerald-500/20">
-              <Shield className="w-8 h-8" />
-            </div>
-            <h1 className="text-3xl font-bold tracking-tight text-white">safeMS {titleSuffix}</h1>
-            <p className="text-zinc-400 text-sm">{t.tagline}</p>
+            <h1 className="text-2xl font-bold text-white">
+              {authMode === 'register' ? "Create an account" : "Welcome back!"}
+            </h1>
+            <p className="text-[#b5bac1] text-sm">
+              {authMode === 'register' ? "Join the most secure community" : "We're so excited to see you again!"}
+            </p>
           </div>
 
-          <div className="flex p-1 bg-black/40 rounded-xl mb-6 relative z-10">
-            <button
-              onClick={() => setAuthMode('register')}
-              className={cn(
-                "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all",
-                authMode === 'register' ? "bg-emerald-500 text-black shadow-lg" : "text-zinc-500 hover:text-zinc-300"
-              )}
-            >
-              {t.registration}
-            </button>
-            <button
-              onClick={() => setAuthMode('login')}
-              className={cn(
-                "flex-1 py-2 text-xs font-bold uppercase tracking-wider rounded-lg transition-all",
-                authMode === 'login' ? "bg-emerald-500 text-black shadow-lg" : "text-zinc-500 hover:text-zinc-300"
-              )}
-            >
-              {t.login}
-            </button>
-          </div>
-
-          {authMode === 'register' ? (
-            <form onSubmit={handleRegister} className="space-y-6 relative z-10">
-              <div className="space-y-2">
-                <label htmlFor="username" className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
-                  {t.usernameLabel}
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <User className="h-5 w-5 text-zinc-500" />
-                  </div>
+          <div className="space-y-4 relative z-10">
+            {authMode === 'register' ? (
+              <form onSubmit={handleRegister} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="username" className="text-[12px] font-bold text-[#b5bac1] uppercase tracking-wider">
+                    {t.usernameLabel} <span className="text-red-500">*</span>
+                  </label>
                   <input
                     id="username"
                     type="text"
                     required
                     value={regUsername}
                     onChange={(e) => setRegUsername(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-3 border border-white/10 rounded-xl bg-black/50 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all sm:text-sm"
-                    placeholder={t.usernamePlaceholder}
+                    className="block w-full px-3 py-2.5 rounded bg-[#1e1f22] text-[#dbdee1] placeholder-[#4e5058] focus:outline-none transition-all sm:text-sm"
                     disabled={isRegistering}
                   />
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <label htmlFor="password" className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
-                  {t.passwordLabel}
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Lock className="h-5 w-5 text-zinc-500" />
+                <div className="space-y-2">
+                  <label htmlFor="password" className="text-[12px] font-bold text-[#b5bac1] uppercase tracking-wider">
+                    {t.passwordLabel} <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      required
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      className="block w-full px-3 py-2.5 rounded bg-[#1e1f22] text-[#dbdee1] placeholder-[#4e5058] focus:outline-none transition-all sm:text-sm"
+                      disabled={isRegistering}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#b5bac1] hover:text-white"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
                   </div>
-                  <input
-                    id="password"
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    className="block w-full pl-10 pr-10 py-3 border border-white/10 rounded-xl bg-black/50 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all sm:text-sm"
-                    placeholder={t.passwordPlaceholder}
-                    disabled={isRegistering}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-500 hover:text-zinc-300"
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={isRegistering || !(regUsername || '').trim() || !(regPassword || '').trim()}
+                  className="w-full py-2.5 px-4 rounded bg-[#5865F2] hover:bg-[#4752c4] text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                >
+                  {isRegistering ? t.registering : t.registerBtn}
+                </button>
+
+                <p className="text-[14px] text-[#949ba4]">
+                  Already have an account?{" "}
+                  <button 
+                    type="button" 
+                    onClick={() => setAuthMode('login')}
+                    className="text-[#00a8fc] hover:underline"
                   >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    Login
                   </button>
-                </div>
-                <p className="text-[10px] text-zinc-500">{t.passwordHint}</p>
-              </div>
-
-              <button
-                type="submit"
-                disabled={isRegistering || !(regUsername || '').trim() || !(regPassword || '').trim()}
-                className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-black bg-emerald-500 hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 focus:ring-offset-[#121212] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isRegistering ? (
-                  <span className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-                    {t.registering}
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <UserPlus className="w-4 h-4" />
-                    {t.registerBtn}
-                  </span>
-                )}
-              </button>
-            </form>
-          ) : (
-            <form onSubmit={handleLogin} className="space-y-6 relative z-10">
-              <div className="space-y-2">
-                <label htmlFor="loginUsername" className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
-                  {t.loginUsernameLabel}
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <User className="h-5 w-5 text-zinc-500" />
-                  </div>
+                </p>
+              </form>
+            ) : (
+              <form onSubmit={handleLogin} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="loginUsername" className="text-[12px] font-bold text-[#b5bac1] uppercase tracking-wider">
+                    {t.loginUsernameLabel} <span className="text-red-500">*</span>
+                  </label>
                   <input
                     id="loginUsername"
                     type="text"
                     required
                     value={regUsername}
                     onChange={(e) => setRegUsername(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-3 border border-white/10 rounded-xl bg-black/50 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all sm:text-sm"
-                    placeholder={t.loginUsernamePlaceholder}
-                    disabled={isRegistering}
+                    className="block w-full px-3 py-2.5 rounded bg-[#1e1f22] text-[#dbdee1] placeholder-[#4e5058] focus:outline-none transition-all sm:text-sm"
+                    disabled={isLoggingIn}
                   />
                 </div>
-              </div>
 
-              <div className="space-y-2">
-                <label htmlFor="loginPassword" className="text-xs font-medium text-zinc-400 uppercase tracking-wider">
-                  {t.loginPasswordLabel}
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Lock className="h-5 w-5 text-zinc-500" />
+                <div className="space-y-2">
+                  <label htmlFor="loginPassword" className="text-[12px] font-bold text-[#b5bac1] uppercase tracking-wider">
+                    {t.loginPasswordLabel} <span className="text-red-500">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      id="loginPassword"
+                      type={showPassword ? "text" : "password"}
+                      required
+                      value={regPassword}
+                      onChange={(e) => setRegPassword(e.target.value)}
+                      className="block w-full px-3 py-2.5 rounded bg-[#1e1f22] text-[#dbdee1] placeholder-[#4e5058] focus:outline-none transition-all sm:text-sm"
+                      disabled={isLoggingIn}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-[#b5bac1] hover:text-white"
+                    >
+                      {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                    </button>
                   </div>
-                  <input
-                    id="loginPassword"
-                    type={showPassword ? "text" : "password"}
-                    required
-                    value={regPassword}
-                    onChange={(e) => setRegPassword(e.target.value)}
-                    className="block w-full pl-10 pr-10 py-3 border border-white/10 rounded-xl bg-black/50 text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500/50 transition-all sm:text-sm"
-                    placeholder={t.loginPasswordPlaceholder}
-                    disabled={isRegistering}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-zinc-500 hover:text-zinc-300"
-                  >
-                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
                 </div>
-              </div>
 
-              <button
-                type="submit"
-                disabled={isLoggingIn || !(regUsername || '').trim() || !(regPassword || '').trim()}
-                className="w-full flex justify-center items-center py-3 px-4 border border-transparent rounded-xl shadow-sm text-sm font-medium text-black bg-emerald-500 hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-emerald-500 focus:ring-offset-[#121212] transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {isLoggingIn ? (
-                  <span className="flex items-center gap-2">
-                    <div className="w-4 h-4 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-                    {t.loggingIn}
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-2">
-                    <Lock className="w-4 h-4" />
-                    {t.loginBtn}
-                  </span>
-                )}
-              </button>
+                <button
+                  type="submit"
+                  disabled={isLoggingIn || !(regUsername || '').trim() || !(regPassword || '').trim()}
+                  className="w-full py-2.5 px-4 rounded bg-[#5865F2] hover:bg-[#4752c4] text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed mt-4"
+                >
+                  {isLoggingIn ? t.loggingIn : t.loginBtn}
+                </button>
 
-              <button
-                type="button"
-                onClick={handleForgetAccount}
-                className="w-full flex justify-center items-center py-3 px-4 border border-white/10 rounded-xl shadow-sm text-sm font-medium text-zinc-400 bg-white/5 hover:bg-white/10 focus:outline-none transition-colors"
-              >
-                <Trash2 className="w-4 h-4 mr-2" />
-                {t.forgetAccount}
-              </button>
-            </form>
-          )}
+                <p className="text-[14px] text-[#949ba4]">
+                  Need an account?{" "}
+                  <button 
+                    type="button" 
+                    onClick={() => setAuthMode('register')}
+                    className="text-[#00a8fc] hover:underline"
+                  >
+                    Register
+                  </button>
+                </p>
 
-          <div className="pt-6 border-t border-white/5 text-center space-y-4 relative z-10">
-            <p className="text-xs text-zinc-500 uppercase tracking-widest font-bold flex items-center justify-center gap-2">
-              <Smartphone className="w-3 h-3" /> {t.mobileAccess}
-            </p>
-            <div className="bg-white p-3 rounded-xl inline-block mx-auto shadow-lg ring-1 ring-black/5">
-              <QRCodeSVG 
-                value={APP_URL} 
-                size={128} 
-                level="H"
-                includeMargin={true}
-              />
-            </div>
-            <p className="text-[10px] text-zinc-500 max-w-[200px] mx-auto leading-relaxed">{t.scanQrHint}</p>
-            <div className="flex items-center justify-center gap-2 text-[10px] text-zinc-600 pt-2">
-              <Lock className="w-3 h-3" />
-              <span>{t.secureNotice}</span>
-            </div>
+                <button
+                  type="button"
+                  onClick={handleForgetAccount}
+                  className="w-full py-2 px-4 text-[12px] text-[#949ba4] hover:text-white transition-colors mt-2"
+                >
+                  {t.forgetAccount}
+                </button>
+              </form>
+            )}
           </div>
         </div>
       </div>
@@ -1924,7 +1922,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
   const activeUser = activeChat === 'bot-safems' 
     ? { id: 'bot-safems', username: 'safeMS', publicKey: 'bot-key', online: true, isBot: true }
-    : users.find(u => u.id === activeChat) || (groups.find(g => g.id === activeChat) ? {
+    : users.find(u => u.id === activeChat) || contactInfo[activeChat as string] || (groups.find(g => g.id === activeChat) ? {
         ...groups.find(g => g.id === activeChat),
         id: groups.find(g => g.id === activeChat)!.id,
         username: groups.find(g => g.id === activeChat)!.name,
@@ -1941,194 +1939,197 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
   const activeMessages = activeChat ? (messages[activeChat] || []) : [];
 
   return (
-    <div className="flex h-full w-full bg-[#0a0a0a] text-zinc-100 font-sans overflow-hidden relative">
+    <div className="flex h-full w-full bg-[#0e1621] text-zinc-100 font-sans overflow-hidden relative">
       {/* Sidebar */}
       <div className={cn(
-        "w-full md:w-72 flex-shrink-0 border-r border-white/5 bg-[#121212] flex flex-col transition-all duration-300",
+        "w-full md:w-[350px] flex-shrink-0 border-r border-[#0e1621] bg-[#17212b] flex flex-col transition-all duration-300",
         activeChat ? "hidden md:flex" : "flex"
       )}>
-        <div className="p-4 border-b border-white/5 flex items-center justify-between bg-black/20">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-400 ring-1 ring-emerald-500/20 overflow-hidden">
-              {currentUser.avatar ? (
-                <img src={currentUser.avatar} alt="My Avatar" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-              ) : (
-                <Shield className="w-5 h-5" />
-              )}
-            </div>
-            <div>
-              <h2 className="font-bold text-white tracking-tight">safeMS {titleSuffix}</h2>
-              <p className="text-xs text-zinc-400 flex items-center gap-1">
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                {currentUser.displayName || currentUser.username}
-                {currentUser.username === 'admin' && <BadgeCheck className="w-3 h-3 text-emerald-500 fill-emerald-500/10" />}
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={() => setShowAddContact(true)} className="p-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors" title={t.addContact}>
-              <UserPlus className="w-4 h-4" />
-            </button>
-            <button onClick={() => setShowSettings(true)} className="p-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors" title={t.settings}>
-              <Settings className="w-4 h-4" />
-            </button>
-            {onClose && (
-              <button onClick={onClose} className="p-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors" title={t.exit}>
-                <LogOut className="w-4 h-4" />
-              </button>
+        {/* Sidebar Header */}
+        <div className="p-2 flex items-center gap-2">
+          <button onClick={() => setShowSettings(true)} className="p-2.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-full transition-colors">
+            <Menu className="w-5 h-5" />
+          </button>
+          <div className="flex-1 relative">
+            <input 
+              type="text"
+              placeholder={t.search}
+              value={searchQuery}
+              onChange={(e) => handleSearch(e.target.value)}
+              className="w-full bg-[#242f3d] border-none rounded-full py-1.5 pl-10 pr-4 text-[13px] text-white placeholder-zinc-500 focus:ring-0 transition-all"
+            />
+            <MessageSquare className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-500" />
+            {isSearching && (
+              <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                <RefreshCw className="w-3 h-3 text-emerald-500 animate-spin" />
+              </div>
             )}
           </div>
+          <button 
+            onClick={() => setShowCreateGroup(true)}
+            className="p-2.5 text-emerald-500 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-full transition-colors"
+            title={t.createGroup}
+          >
+            <Plus className="w-5 h-5" />
+          </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3 space-y-1">
-          <div className="flex items-center justify-between px-3 py-2">
-            <div className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-              {t.groups} ({groups.filter(g => g.members.includes(currentUser.id)).length})
-            </div>
-            <button 
-              onClick={() => setShowCreateGroup(true)}
-              className="p-1 hover:bg-white/5 rounded-lg text-emerald-500 transition-colors"
-              title={t.createGroup}
-            >
-              <Users className="w-4 h-4" />
-            </button>
-          </div>
-
-          {groups.filter(g => g.members.includes(currentUser.id)).length === 0 ? (
-            <div className="px-3 py-4 text-center text-zinc-600 text-[10px]">
-              {t.noGroupsDesc || "No groups joined yet"}
+        {/* Chat List */}
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          {searchQuery.trim() ? (
+            <div className="p-2">
+              <h3 className="px-3 py-2 text-xs font-semibold text-emerald-500 uppercase tracking-wider">{t.searchResults}</h3>
+              {searchResults.length === 0 && !isSearching ? (
+                <p className="px-3 py-4 text-sm text-zinc-500 text-center">{t.noResults}</p>
+              ) : (
+                searchResults.map(user => (
+                  <button
+                    key={user.id}
+                    onClick={() => {
+                      setActiveChat(user.id);
+                      setContactInfo(prev => ({ ...prev, [user.id]: user }));
+                      setSearchQuery('');
+                      setSearchResults([]);
+                    }}
+                    className="w-full flex items-center gap-3 px-3 py-3 rounded-xl hover:bg-white/5 transition-all text-left"
+                  >
+                    <div className="w-12 h-12 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500">
+                      {user.avatar ? <img src={user.avatar} className="w-full h-full rounded-full object-cover" /> : <User className="w-6 h-6" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-white truncate">{user.displayName || user.username}</p>
+                      <p className="text-xs text-zinc-500 truncate">@{user.username}</p>
+                    </div>
+                  </button>
+                ))
+              )}
             </div>
           ) : (
-            groups.filter(g => g.members.includes(currentUser.id)).map(group => (
+            <div className="p-1">
+              {/* Pinned / Bot */}
               <button
-                key={group.id}
-                onClick={() => setActiveChat(group.id)}
+                onClick={() => setActiveChat('bot-safems')}
                 className={cn(
-                  "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-left",
-                  activeChat === group.id 
-                    ? "bg-white/10 ring-1 ring-white/5" 
-                    : "hover:bg-white/5"
+                  "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left",
+                  activeChat === 'bot-safems' ? "bg-[#2b5278]" : "hover:bg-white/5"
                 )}
               >
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500 font-medium uppercase overflow-hidden">
+                <div className="w-11 h-11 rounded-full bg-emerald-500 flex items-center justify-center text-white flex-shrink-0">
+                  <Bot className="w-6 h-6" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex justify-between items-baseline">
+                    <p className="text-[14px] font-semibold text-white truncate">safeMS</p>
+                    {messages['bot-safems']?.length > 0 && (
+                      <span className="text-[11px] text-zinc-400">
+                        {format(messages['bot-safems'][messages['bot-safems'].length - 1].timestamp, 'HH:mm')}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[13px] text-zinc-400 truncate">{t.systemAssistant}</p>
+                </div>
+              </button>
+
+              {/* Groups */}
+              {groups.filter(g => g.members.includes(currentUser.id)).map(group => (
+                <button
+                  key={group.id}
+                  onClick={() => setActiveChat(group.id)}
+                  className={cn(
+                    "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left",
+                    activeChat === group.id ? "bg-[#2b5278]" : "hover:bg-white/5"
+                  )}
+                >
+                  <div className="w-11 h-11 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500 font-bold uppercase overflow-hidden flex-shrink-0">
                     {group.avatar ? (
                       <img src={group.avatar} alt={group.name} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     ) : (
                       group.name.charAt(0)
                     )}
                   </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-baseline">
-                    <p className="text-sm font-medium text-zinc-200 truncate flex items-center gap-1">
-                      {group.name}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex justify-between items-baseline">
+                      <p className="text-[14px] font-semibold text-white truncate">{group.name}</p>
+                      {messages[group.id]?.length > 0 && (
+                        <span className="text-[11px] text-zinc-400">
+                          {format(messages[group.id][messages[group.id].length - 1].timestamp, 'HH:mm')}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[13px] text-zinc-400 truncate">
+                      {messages[group.id]?.length > 0 
+                        ? messages[group.id][messages[group.id].length - 1].content 
+                        : t.groupChat}
                     </p>
-                    {messages[group.id]?.length > 0 && (
-                      <span className="text-[10px] text-zinc-500">
-                        {format(messages[group.id][messages[group.id].length - 1].timestamp, 'HH:mm')}
-                      </span>
-                    )}
                   </div>
-                  <p className="text-xs text-zinc-500 truncate">
-                    {group.members.length} {t.members}
-                  </p>
-                </div>
-              </button>
-            ))
-          )}
+                </button>
+              ))}
 
-          <div className="px-3 py-2 pt-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-            {t.contacts} ({contacts.length + 1})
-          </div>
-          
-          {/* Bot Contact */}
-          <button
-            onClick={() => setActiveChat('bot-safems')}
-            className={cn(
-              "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-left",
-              activeChat === 'bot-safems' 
-                ? "bg-white/10 ring-1 ring-white/5" 
-                : "hover:bg-white/5"
-            )}
-          >
-            <div className="relative">
-              <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500">
-                <Bot className="w-5 h-5" />
-              </div>
-              <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#121212]" />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex justify-between items-baseline">
-                <p className="text-sm font-medium text-emerald-400 truncate">safeMS</p>
-                {messages['bot-safems']?.length > 0 && (
-                  <span className="text-[10px] text-zinc-500">
-                    {format(messages['bot-safems'][messages['bot-safems'].length - 1].timestamp, 'HH:mm')}
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-emerald-500/70 truncate">
-                {t.systemAssistant}
-              </p>
-            </div>
-          </button>
-
-          {contacts.length === 0 ? (
-            <div className="px-3 py-8 text-center text-zinc-500 text-sm">
-              {t.noContactsDesc}
-            </div>
-          ) : (
-            contacts.map(contactId => {
-              const user = users.find(u => u.id === contactId) || {
-                id: contactId,
-                username: contactId.substring(0, 8) + '...',
-                publicKey: '',
-                online: false,
-                lastSeen: 0
-              };
-              
-              return (
-              <button
-                key={user.id}
-                onClick={() => setActiveChat(user.id)}
-                className={cn(
-                  "w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-left",
-                  activeChat === user.id 
-                    ? "bg-white/10 ring-1 ring-white/5" 
-                    : "hover:bg-white/5"
-                )}
-              >
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 font-medium uppercase overflow-hidden">
-                    {user.avatar ? (
-                      <img src={user.avatar} alt={user.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                    ) : (
-                      user.username.charAt(0)
+              {/* Contacts */}
+              {contacts.map(contactId => {
+                const serverUser = users.find(u => u.id === contactId);
+                const user = serverUser || contactInfo[contactId] || {
+                  id: contactId,
+                  username: contactId.substring(0, 8) + '...',
+                  publicKey: '',
+                  online: false,
+                  lastSeen: 0,
+                  isNotFound: true
+                };
+                
+                return (
+                <div key={user.id} className="group relative">
+                  <button
+                    onClick={() => setActiveChat(user.id)}
+                    className={cn(
+                      "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all text-left",
+                      activeChat === user.id ? "bg-[#2b5278]" : "hover:bg-white/5"
                     )}
-                  </div>
-                  <div className={cn(
-                    "absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#121212]",
-                    user.online ? "bg-emerald-500" : "bg-zinc-500"
-                  )} />
+                  >
+                    <div className="relative flex-shrink-0">
+                      <div className="w-11 h-11 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 font-bold uppercase overflow-hidden ring-1 ring-white/5">
+                        {user.avatar ? (
+                          <img src={user.avatar} alt={user.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                        ) : (
+                          user.username.charAt(0)
+                        )}
+                      </div>
+                      {!user.isNotFound && user.online && (
+                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 rounded-full border-2 border-[#17212b]" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-baseline">
+                        <p className={cn(
+                          "text-[14px] font-semibold truncate flex items-center gap-1",
+                          user.isNotFound ? "text-zinc-500 italic" : "text-white"
+                        )}>
+                          {user.displayName || user.username}
+                          {user.username === 'admin' && <BadgeCheck className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500/10" />}
+                        </p>
+                        {messages[user.id]?.length > 0 && (
+                          <span className="text-[11px] text-zinc-400">
+                            {format(messages[user.id][messages[user.id].length - 1].timestamp, 'HH:mm')}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[13px] text-zinc-400 truncate">
+                        {messages[user.id]?.length > 0 
+                          ? messages[user.id][messages[user.id].length - 1].content 
+                          : (user.isNotFound ? t.userNotFound : (user.online ? t.online : formatLastSeen(user.lastSeen || 0)))}
+                      </p>
+                    </div>
+                  </button>
+                  <button
+                    onClick={(e) => handleDeleteContact(user.id, e)}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-red-500/10 hover:bg-red-500 text-red-500 hover:text-white rounded-lg opacity-0 group-hover:opacity-100 transition-all z-10"
+                    title={t.deleteContact}
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex justify-between items-baseline">
-                    <p className="text-sm font-medium text-zinc-200 truncate flex items-center gap-1">
-                      {user.displayName || user.username}
-                      {user.username === 'admin' && <BadgeCheck className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500/10" />}
-                    </p>
-                    {messages[user.id]?.length > 0 && (
-                      <span className="text-[10px] text-zinc-500">
-                        {format(messages[user.id][messages[user.id].length - 1].timestamp, 'HH:mm')}
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-zinc-500 truncate">
-                    {user.online ? t.online : formatLastSeen(user.lastSeen || 0)}
-                  </p>
-                </div>
-              </button>
-            )})
+              )})}
+            </div>
           )}
         </div>
       </div>
@@ -2141,73 +2142,41 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
         {activeChat && activeUser ? (
           <React.Fragment>
             {/* Chat Header */}
-            <div className="h-16 border-b border-white/5 flex items-center px-4 md:px-6 bg-[#121212]/50 backdrop-blur-md sticky top-0 z-10">
+            <div className="h-14 border-b border-white/5 flex items-center px-4 md:px-6 bg-[#17212b] sticky top-0 z-10">
               <div className="flex items-center gap-3 flex-1 min-w-0">
-                {/* Back button for mobile */}
                 <button 
                   onClick={() => setActiveChat(null)}
-                  className="md:hidden p-2 -ml-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
+                  className="md:hidden p-2 -ml-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
                 >
-                  <ArrowLeft className="w-5 h-5" />
+                  <ArrowLeft className="w-6 h-6" />
                 </button>
 
-                <div className="relative flex-shrink-0">
-                  {activeUser.isBot ? (
-                    <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500">
-                      <Bot className="w-5 h-5" />
-                    </div>
-                  ) : activeUser.isGroup ? (
-                    <div className="w-10 h-10 rounded-full bg-emerald-500/10 flex items-center justify-center text-emerald-500 font-medium uppercase overflow-hidden">
-                      {activeUser.avatar ? (
-                        <img src={activeUser.avatar} alt={activeUser.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      ) : (
-                        activeUser.username.charAt(0)
-                      )}
-                    </div>
+                <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 font-medium uppercase overflow-hidden">
+                  {activeUser.avatar ? (
+                    <img src={activeUser.avatar} alt={activeUser.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                   ) : (
-                    <div className="w-10 h-10 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-300 font-medium uppercase overflow-hidden">
-                      {activeUser.avatar ? (
-                        <img src={activeUser.avatar} alt={activeUser.username} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
-                      ) : (
-                        activeUser.username.charAt(0)
-                      )}
-                    </div>
-                  )}
-                  {!activeUser.isGroup && (
-                    <div className={cn(
-                      "absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-[#121212]",
-                      activeUser.online ? "bg-emerald-500" : "bg-zinc-500"
-                    )} />
+                    activeUser.username.charAt(0)
                   )}
                 </div>
-                <div className="min-w-0">
-                  <h3 className="font-medium text-zinc-100 flex items-center gap-1.5 truncate">
+                <div className="flex-1 min-w-0">
+                  <h3 className="text-sm font-bold text-white truncate flex items-center gap-1">
                     {activeUser.displayName || activeUser.username}
-                    {activeUser.username === 'admin' && <BadgeCheck className="w-4 h-4 text-emerald-500 fill-emerald-500/10" />}
+                    {activeUser.username === 'admin' && <BadgeCheck className="w-3.5 h-3.5 text-emerald-500 fill-emerald-500/10" />}
                   </h3>
-                  <div className="flex items-center gap-1.5 text-xs text-emerald-500/80">
-                    {activeUser.isGroup ? <Users className="w-3 h-3" /> : <Lock className="w-3 h-3" />}
-                    <span className="truncate">{activeUser.isBot ? "System Assistant" : activeUser.isGroup ? `${activeUser.members?.length || 0} ${t.members}` : "End-to-end encrypted"}</span>
-                  </div>
+                  <p className="text-[11px] text-emerald-500">
+                    {activeUser.isBot ? t.systemAssistant : (activeUser.online ? t.online : formatLastSeen(activeUser.lastSeen || 0))}
+                  </p>
                 </div>
               </div>
 
-              <div className="flex items-center gap-1 sm:gap-2">
+              <div className="flex items-center gap-1">
                 {!activeUser.isGroup && !activeUser.isBot && (
                   <>
-                    <button
-                      onClick={() => startCall(activeUser as UserData, false)}
-                      className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all duration-200"
-                      title={t.audioCall}
-                    >
-                      <Phone className="w-5 h-5" />
-                    </button>
-                    <button
-                      onClick={() => startCall(activeUser as UserData, true)}
-                      className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-lg transition-all duration-200"
-                      title={t.videoCall}
-                    >
+                    <button onClick={() => startCall(activeUser as UserData, true)} className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-white/5 rounded-full transition-colors">
                       <Camera className="w-5 h-5" />
+                    </button>
+                    <button onClick={() => startCall(activeUser as UserData, false)} className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-white/5 rounded-full transition-colors">
+                      <Phone className="w-5 h-5" />
                     </button>
                   </>
                 )}
@@ -2220,7 +2189,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                       title={t.groupMembers}
                     >
                       <Users className="w-4 h-4" />
-                      <span className="hidden lg:inline">{t.members}</span>
                     </button>
                     
                     <button
@@ -2233,7 +2201,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                       title={t.inviteLink}
                     >
                       <Link className="w-4 h-4" />
-                      <span className="hidden lg:inline">{t.inviteLink}</span>
                     </button>
 
                     {activeUser.adminId === currentUser.id && (
@@ -2246,20 +2213,35 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                         title={t.groupSettings}
                       >
                         <Settings className="w-4 h-4" />
-                        <span className="hidden lg:inline">{t.settings}</span>
                       </button>
                     )}
                   </>
                 )}
+                <button className="p-2 text-zinc-400 hover:text-white hover:bg-white/5 rounded-full transition-colors">
+                  <Copy className="w-5 h-5" />
+                </button>
               </div>
             </div>
 
-          {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-6">
-              <div className="flex justify-center mb-8">
-                <div className="bg-emerald-500/10 text-emerald-400/80 text-xs px-4 py-2 rounded-full flex items-center gap-2 ring-1 ring-emerald-500/20 text-center max-w-md">
-                  <Lock className="w-4 h-4 flex-shrink-0" />
-                  {activeUser.isBot ? "This is a local system bot. Messages are not sent to the network." : "Messages are end-to-end encrypted. No one outside of this chat can read them."}
+            {/* Add to Contacts Banner */}
+            {!contacts.includes(activeUser.id) && !activeUser.isBot && !activeUser.isGroup && (
+              <div className="bg-[#242f3d] p-3 flex items-center justify-between border-b border-white/5">
+                <p className="text-xs text-zinc-300">{t.userNotFound}</p>
+                <button 
+                  onClick={() => handleAddContact(activeUser as UserData)}
+                  className="px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-full transition-colors"
+                >
+                  {t.addToContacts}
+                </button>
+              </div>
+            )}
+
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-[#0e1621] custom-scrollbar" style={{ backgroundImage: 'url("https://picsum.photos/seed/chat/1920/1080?blur=10")', backgroundSize: 'cover', backgroundBlendMode: 'overlay' }}>
+              <div className="flex justify-center mb-4">
+                <div className="bg-black/40 backdrop-blur-md text-zinc-300 text-[10px] px-3 py-1 rounded-full flex items-center gap-2">
+                  <Lock className="w-3 h-3" />
+                  {activeUser.isBot ? "Local system bot. No network traffic." : "End-to-end encrypted."}
                 </div>
               </div>
 
@@ -2275,12 +2257,12 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                 );
               })}
               {isBotTyping && activeChat === 'bot-safems' && (
-                <div className="flex justify-start mb-6">
-                  <div className="bg-[#121212] border border-white/5 rounded-2xl rounded-tl-none p-4 max-w-[75%] shadow-sm">
+                <div className="flex justify-start">
+                  <div className="bg-[#17212b] rounded-2xl p-3 shadow-sm">
                     <div className="flex gap-1">
-                      <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <div className="w-2 h-2 bg-emerald-500/50 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+                      <div className="w-1.5 h-1.5 bg-emerald-500/50 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+                      <div className="w-1.5 h-1.5 bg-emerald-500/50 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+                      <div className="w-1.5 h-1.5 bg-emerald-500/50 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
                     </div>
                   </div>
                 </div>
@@ -2289,71 +2271,88 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
             </div>
 
             {/* Input Area */}
-            <div className="bg-[#121212] border-t border-white/5 flex flex-col">
+            <div className="bg-[#17212b] p-2 md:p-3 flex flex-col gap-2 relative">
+              {showEmojiPicker && (
+                <div className="absolute bottom-full left-0 z-50">
+                  <EmojiPicker 
+                    onEmojiClick={(emojiData) => {
+                      setInputText(prev => prev + emojiData.emoji);
+                      setShowEmojiPicker(false);
+                    }}
+                    theme={EmojiTheme.DARK}
+                    emojiStyle={EmojiStyle.GOOGLE}
+                    lazyLoadEmojis={true}
+                  />
+                </div>
+              )}
               {activeChat === 'bot-safems' && (
-                <div className="px-4 py-3 border-b border-white/5 flex flex-wrap gap-2">
-                  <button onClick={() => handleBotMessage('Как работает сайт?')} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-xs text-zinc-300 rounded-full transition-colors border border-white/10">
+                <div className="flex flex-wrap gap-1.5 mb-1">
+                  <button onClick={() => handleBotMessage('Как работает сайт?')} className="px-3 py-1 bg-white/5 hover:bg-white/10 text-[10px] text-zinc-300 rounded-full transition-colors border border-white/10">
                     ℹ️ Как работает сайт?
                   </button>
-                  <button onClick={() => handleBotMessage('Проверить аккаунт на взлом')} className="px-3 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-xs text-emerald-400 rounded-full transition-colors border border-emerald-500/20">
+                  <button onClick={() => handleBotMessage('Проверить аккаунт на взлом')} className="px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-[10px] text-emerald-400 rounded-full transition-colors border border-emerald-500/20">
                     🛡️ Проверить на взлом
                   </button>
-                  <button onClick={() => handleBotMessage('Как удалить данные?')} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-xs text-zinc-300 rounded-full transition-colors border border-white/10">
-                    🗑️ Как удалить данные?
+                  <button onClick={() => handleBotMessage('Как устроен проект?')} className="px-3 py-1 bg-white/5 hover:bg-white/10 text-[10px] text-zinc-300 rounded-full transition-colors border border-white/10">
+                    🏗️ Архитектура
                   </button>
-                  <button onClick={() => handleBotMessage('Как устроен мессенджер?')} className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-xs text-zinc-300 rounded-full transition-colors border border-white/10">
-                    🏗️ Как устроен мессенджер?
+                  <button onClick={() => handleBotMessage('Как удалить аккаунт?')} className="px-3 py-1 bg-red-500/10 hover:bg-red-500/20 text-[10px] text-red-400 rounded-full transition-colors border border-red-500/20">
+                    🗑️ Удаление
+                  </button>
+                  <button onClick={() => handleBotMessage('Как создать группу?')} className="px-3 py-1 bg-blue-500/10 hover:bg-blue-500/20 text-[10px] text-blue-400 rounded-full transition-colors border border-blue-500/20">
+                    👥 Группы
                   </button>
                 </div>
               )}
-              <div className="p-4">
-                <form
-                  onSubmit={handleSendMessage}
-                  className="flex items-end gap-2 max-w-4xl mx-auto"
+              <form
+                onSubmit={handleSendMessage}
+                className="flex items-end gap-2 max-w-5xl mx-auto w-full"
+              >
+                <button
+                  type="button"
+                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  className="p-2.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
                 >
-                <div className="flex-1 bg-black/50 border border-white/10 rounded-2xl focus-within:ring-1 focus-within:ring-emerald-500/50 focus-within:border-emerald-500/50 transition-all overflow-hidden flex items-center pr-2">
+                  <Smile className="w-6 h-6" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-2.5 text-zinc-400 hover:text-white hover:bg-white/5 rounded-full transition-colors"
+                >
+                  <Paperclip className="w-6 h-6" />
+                </button>
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                <div className="flex-1 bg-[#242f3d] rounded-2xl overflow-hidden flex items-center pr-2">
                   <input
                     type="text"
                     value={inputText}
                     onChange={(e) => setInputText(e.target.value)}
-                    placeholder={isSending ? 'Encrypting...' : (activeUser.publicKey ? `Message ${activeUser.username}...` : 'Waiting for user to come online...')}
-                    disabled={!activeUser.publicKey || isSending}
-                    className="w-full bg-transparent text-zinc-100 px-4 py-3.5 focus:outline-none text-[15px] disabled:opacity-50"
-                  />
-                  <input
-                    type="file"
-                    ref={fileInputRef}
-                    onChange={handleFileSelect}
+                    placeholder={isSending ? 'Encrypting...' : t.messagePlaceholder || "Write a message..."}
                     disabled={isSending}
-                    className="hidden"
+                    className="w-full bg-transparent text-white px-4 py-3 focus:outline-none text-sm"
                   />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={!activeUser.publicKey || isSending}
-                    className="p-2 text-zinc-400 hover:text-emerald-400 hover:bg-emerald-500/10 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Attach File"
-                  >
-                    <Paperclip className="w-5 h-5" />
-                  </button>
                 </div>
                 <button
                   type="submit"
-                  disabled={!(inputText || '').trim() || !activeUser.publicKey || isSending}
-                  className="p-3.5 rounded-2xl bg-emerald-500 text-black hover:bg-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-[#121212] disabled:opacity-50 disabled:cursor-not-allowed transition-all flex-shrink-0"
-                >
-                  {isSending ? (
-                    <div className="w-5 h-5 border-2 border-black/20 border-t-black rounded-full animate-spin" />
-                  ) : (
-                    <Send className="w-5 h-5" />
+                  disabled={!inputText.trim() || isSending}
+                  className={cn(
+                    "p-3 rounded-full transition-all flex items-center justify-center",
+                    inputText.trim() ? "bg-emerald-500 text-white shadow-lg shadow-emerald-500/20" : "bg-zinc-800 text-zinc-500"
                   )}
+                >
+                  <Send className="w-5 h-5" />
                 </button>
               </form>
             </div>
-          </div>
-        </React.Fragment>
-      ) : (
-        <div className="flex-1 hidden md:flex flex-col items-center justify-center p-8 text-center bg-[#0a0a0a]">
+          </React.Fragment>
+        ) : (
+          <div className="flex-1 hidden md:flex flex-col items-center justify-center p-8 text-center bg-[#0a0a0a]">
           <div className="w-20 h-20 rounded-3xl bg-emerald-500/10 flex items-center justify-center text-emerald-500 mb-6 ring-1 ring-emerald-500/20">
             <Shield className="w-10 h-10" />
           </div>
@@ -2424,19 +2423,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                       {t.save}
                     </button>
                   </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t.yourChatKey}</label>
-                <p className="text-xs text-zinc-500 mb-3">{t.shareKeyHint}</p>
-                <div className="flex items-center gap-2">
-                  <code className="flex-1 bg-black/50 border border-white/10 rounded-xl p-3 text-emerald-400 text-xs break-all select-all h-24 overflow-y-auto">
-                    {currentUser.id}
-                  </code>
-                  <button onClick={handleCopyKey} className="p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl transition-colors flex-shrink-0 self-start">
-                    {copySuccess ? <Check className="w-5 h-5 text-emerald-500" /> : <Copy className="w-5 h-5 text-zinc-400" />}
-                  </button>
                 </div>
               </div>
 
@@ -2658,47 +2644,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
         </div>
       )}
 
-      {showAddContact && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-[#121212] border border-white/10 rounded-2xl p-6 w-full max-w-md space-y-6 relative shadow-2xl">
-            <button onClick={() => setShowAddContact(false)} className="absolute top-4 right-4 p-2 text-zinc-500 hover:text-white transition-colors">
-              <X className="w-6 h-6" />
-            </button>
-            <h2 className="text-xl font-bold text-white flex items-center gap-2">
-              <UserPlus className="w-5 h-5 text-emerald-500" /> {t.addContactTitle}
-            </h2>
-            <form onSubmit={handleAddContact} className="space-y-4">
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-zinc-400 uppercase tracking-wider">{t.chatKeyLabel}</label>
-                  <button 
-                    type="button"
-                    onClick={() => setShowQrScanner(true)}
-                    className="text-emerald-500 hover:text-emerald-400 text-xs font-bold flex items-center gap-1 transition-colors"
-                  >
-                    <QrCode className="w-3 h-3" /> {t.scanQr}
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  value={contactKeyInput}
-                  onChange={(e) => setContactKeyInput(e.target.value)}
-                  placeholder={t.chatKeyPlaceholder}
-                  className="w-full bg-black/50 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all font-mono text-sm"
-                  autoFocus
-                />
-              </div>
-              <button
-                type="submit"
-                disabled={!(contactKeyInput || '').trim()}
-                className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-black font-medium rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {t.addBtn}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
       {isAdminMode && (
         <div className="fixed bottom-0 right-0 md:bottom-4 md:right-4 w-full md:w-96 max-h-[400px] bg-[#121212] border-t md:border border-emerald-500/30 rounded-t-2xl md:rounded-2xl shadow-2xl z-[60] flex flex-col overflow-hidden backdrop-blur-xl">
           <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between bg-emerald-500/5">
@@ -3032,17 +2977,6 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
           </motion.div>
         </div>
       )}
-      {showQrScanner && (
-        <QrScanner 
-          onScan={(data) => {
-            setContactKeyInput(data);
-            setShowQrScanner(false);
-            addLog('QR code scanned successfully', 'success');
-          }}
-          onClose={() => setShowQrScanner(false)}
-        />
-      )}
-
       {/* Media elements for WebRTC */}
       <audio ref={remoteAudioRef} autoPlay />
       <audio ref={notificationSoundRef} src="/notification.mp3" preload="auto" />
