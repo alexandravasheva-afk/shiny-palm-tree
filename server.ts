@@ -378,10 +378,6 @@ async function startServer() {
       });
     });
 
-    socket.on('check_username', (username: string, callback: (available: boolean) => void) => {
-      callback(!usernameToId.has(username));
-    });
-
     socket.on('search_user', (username: string, callback: (user: any) => void) => {
       const id = usernameToId.get(username);
       if (id) {
@@ -657,6 +653,14 @@ async function startServer() {
   });
 
   app.get('/api/health', (req, res) => res.json({ status: 'ok' }));
+
+  app.get('/api/admin/db', (req, res) => {
+    if (fs.existsSync(DB_PATH)) {
+      res.download(DB_PATH, 'db.json');
+    } else {
+      res.status(404).send('Database file not found');
+    }
+  });
 
   const isProd = process.env.NODE_ENV === 'production';
   const rootDir = process.cwd();

@@ -207,6 +207,7 @@ const FileAttachment = ({ msg }: { msg: Message }) => {
     const a = document.createElement('a');
     a.href = msg.content;
     a.download = msg.fileName || 'download';
+    a.target = '_blank'; // Help with iframe restrictions
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -218,7 +219,7 @@ const FileAttachment = ({ msg }: { msg: Message }) => {
         <div className="relative group rounded-xl overflow-hidden bg-black/20">
           <img src={msg.content} alt={msg.fileName} className="max-w-full max-h-64 object-contain" />
           <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-            <a href={msg.content} download={msg.fileName} className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors backdrop-blur-sm">
+            <a href={msg.content} download={msg.fileName} target="_blank" rel="noopener noreferrer" className="p-3 bg-white/20 hover:bg-white/30 rounded-full text-white transition-colors backdrop-blur-sm">
               <Download className="w-6 h-6" />
             </a>
           </div>
@@ -243,6 +244,8 @@ const FileAttachment = ({ msg }: { msg: Message }) => {
           <a 
             href={msg.content} 
             download={msg.fileName} 
+            target="_blank"
+            rel="noopener noreferrer"
             onClick={handleDownloadClick}
             className="p-2 bg-white/10 hover:bg-white/20 rounded-lg transition-colors flex-shrink-0"
             title="Download File"
@@ -2478,6 +2481,20 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
                         </button>
                       </div>
                     </div>
+
+                    <div className="pt-3 border-t border-white/5">
+                      <h4 className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider mb-2">Database Management</h4>
+                      <a 
+                        href="/api/admin/db" 
+                        download="db.json"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full flex items-center justify-center gap-2 py-2 bg-white/5 hover:bg-white/10 text-emerald-500 text-[10px] font-bold rounded-xl transition-all border border-emerald-500/20"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        Download db.json
+                      </a>
+                    </div>
                   </div>
                 </div>
               )}
@@ -2979,8 +2996,8 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
       )}
       {/* Media elements for WebRTC */}
       <audio ref={remoteAudioRef} autoPlay />
-      <audio ref={notificationSoundRef} src="/notification.mp3" preload="auto" />
-      <audio ref={ringtoneSoundRef} src="/ringtone.mp3" preload="auto" />
+      <audio ref={notificationSoundRef} src="https://cdn.pixabay.com/audio/2022/03/15/audio_78390a2431.mp3" preload="auto" />
+      <audio ref={ringtoneSoundRef} src="https://cdn.pixabay.com/audio/2022/03/10/audio_c8c8a73053.mp3" preload="auto" />
 
       {/* Incoming Call Modal */}
       {callStatus === 'incoming' && callPartner && (
