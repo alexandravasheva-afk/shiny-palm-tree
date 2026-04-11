@@ -1257,7 +1257,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
   const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!regUsername.trim() || !regPassword.trim() || !socket) {
+    if (!regUsername.trim() || !regPassword || !socket) {
       alert(t.requiredFields);
       return;
     }
@@ -1277,8 +1277,8 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
         const pubKeyBase64 = await exportPublicKey(keyPair.publicKey);
         const privKeyBase64 = await exportPrivateKey(keyPair.privateKey);
         
-        const passwordHash = await hashString(regPassword.trim());
-        const encryptedPrivateKey = await encryptWithPassword(privKeyBase64, regPassword.trim());
+        const passwordHash = await hashString(regPassword);
+        const encryptedPrivateKey = await encryptWithPassword(privKeyBase64, regPassword);
         
         const id = uuidv4();
 
@@ -1292,7 +1292,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
           avatar: user.avatar,
           publicKeyBase64: pubKeyBase64,
           privateKeyBase64: privKeyBase64,
-          password: regPassword.trim()
+          password: regPassword
         });
 
         setCurrentUser(user);
@@ -1319,7 +1319,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!regUsername.trim() || !regPassword.trim() || !socket) {
+    if (!regUsername.trim() || !regPassword || !socket) {
       alert(t.requiredFields);
       return;
     }
@@ -1327,7 +1327,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
     addLog(`Starting login for ${regUsername}`, 'info');
 
     try {
-      const passwordHash = await hashString(regPassword.trim());
+      const passwordHash = await hashString(regPassword);
       
       socket.emit('login', { username: regUsername.trim(), passwordHash }, async (response: { success: boolean; user?: any; message?: string }) => {
         if (!response.success) {
@@ -1339,7 +1339,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
 
         try {
           const userData = response.user;
-          const privKeyBase64 = await decryptWithPassword(userData.encryptedPrivateKey, regPassword.trim());
+          const privKeyBase64 = await decryptWithPassword(userData.encryptedPrivateKey, regPassword);
           
           const privateKey = await importPrivateKey(privKeyBase64);
           const publicKey = await importPublicKey(userData.publicKey);
@@ -1360,7 +1360,7 @@ function ChatClient({ storagePrefix, onClose, titleSuffix = '' }: { storagePrefi
             avatar: user.avatar,
             publicKeyBase64: userData.publicKey,
             privateKeyBase64: privKeyBase64,
-            password: regPassword.trim()
+            password: regPassword
           });
 
           if (userData.contacts && Array.isArray(userData.contacts)) {
